@@ -1,0 +1,7 @@
+--target=~/.config
+--ignore=.stowrc
+--ignore=.DS_Store
+--ignore=.git
+--ignore=.gitignore
+--ignore=.*\.local\.example
+--ignore=.*\.local

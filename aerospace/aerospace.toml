@@ -1,0 +1,147 @@
+start-at-login = true
+
+enable-normalization-flatten-containers = true
+enable-normalization-opposite-orientation-for-nested-containers = true
+
+# Focused-window outline via JankyBorders (brew install borders).
+# active_color = Catppuccin mauve; inactive transparent = highlight focus only.
+after-startup-command = [
+  'exec-and-forget borders active_color=0xffcba6f7 inactive_color=0x00000000 width=5.0'
+]
+
+accordion-padding = 300
+default-root-container-layout = 'tiles'
+default-root-container-orientation = 'auto'
+
+on-focused-monitor-changed = ['move-mouse monitor-lazy-center']
+automatically-unhide-macos-hidden-apps = false
+
+# Float rules
+[[on-window-detected]]
+if.app-name-regex-substring = 'finder'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.apple.systempreferences'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-name-regex-substring = 'system settings'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.cron.electron'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.apple.MobileSMS'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.automattic.beeper.desktop'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'net.whatsapp.WhatsApp'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.hnc.Discord'
+run = 'layout floating'
+# Auto-place apps on their home workspace so they ride monitor changes
+#
+# Ghostty's bundle ID com.mitchellh.ghostty is the official one
+[[on-window-detected]]
+if.app-id = 'com.mitchellh.ghostty'
+run = 'move-node-to-workspace 2'
+
+# Arc's bundle ID company.thebrowser.Browser should be correct;
+# verify with osascript -e 'id of app "Arc"' if needed
+[[on-window-detected]]
+if.app-id = 'company.thebrowser.Browser'
+run = 'move-node-to-workspace 3'
+
+[key-mapping]
+preset = 'qwerty'
+
+[gaps]
+inner.horizontal = 10
+inner.vertical = 10
+outer.left = 0
+outer.right = 0
+outer.top = 0
+outer.bottom = 0
+
+# Main mode: always-active hyper (alt+ctrl+shift) bindings + entry into other modes
+[mode.main.binding]
+
+# Focus
+alt-ctrl-shift-h = 'focus left'
+alt-ctrl-shift-j = 'focus down'
+alt-ctrl-shift-k = 'focus up'
+alt-ctrl-shift-l = 'focus right'
+
+# Workspaces
+alt-ctrl-shift-1 = 'workspace 1'
+alt-ctrl-shift-2 = 'workspace 2'
+alt-ctrl-shift-3 = 'workspace 3'
+alt-ctrl-shift-tab = 'workspace-back-and-forth'
+
+# Mode entry
+alt-shift-enter = 'mode window'
+alt-shift-a = 'mode apps'
+alt-shift-semicolon = 'mode service'
+
+# Window mode: manipulate the focused window, then return to main
+[mode.window.binding]
+esc = 'mode main'
+
+# Move
+h = ['move left', 'mode main']
+j = ['move down', 'mode main']
+k = ['move up', 'mode main']
+l = ['move right', 'mode main']
+
+# Move to workspace
+1 = ['move-node-to-workspace 1 --focus-follows-window', 'mode main']
+2 = ['move-node-to-workspace 2 --focus-follows-window', 'mode main']
+3 = ['move-node-to-workspace 3 --focus-follows-window', 'mode main']
+
+# Join with neighbor
+shift-h = ['join-with left', 'mode main']
+shift-j = ['join-with down', 'mode main']
+shift-k = ['join-with up', 'mode main']
+shift-l = ['join-with right', 'mode main']
+
+# Resize (stay in mode so you can keep pressing)
+minus = 'resize smart -50'
+equal = 'resize smart +50'
+
+# Layout
+t = ['layout tiles horizontal vertical', 'mode main']
+s = ['layout accordion horizontal vertical', 'mode main']
+f = ['layout floating tiling', 'mode main']
+m = ['fullscreen', 'mode main']
+
+# Apps mode: launch app, return to main
+[mode.apps.binding]
+esc = 'mode main'
+g = ['exec-and-forget open -a /Applications/Ghostty.app', 'mode main']
+o = ['exec-and-forget open -a /Applications/Obsidian.app', 'mode main']
+a = ['exec-and-forget open -a /Applications/Arc.app', 'mode main']
+
+# Service mode: reload, reset, cleanup
+[mode.service.binding]
+esc = 'mode main'
+r = ['reload-config', 'mode main']
+f = ['flatten-workspace-tree', 'mode main']
+backspace = ['close-all-windows-but-current', 'mode main']
+
+# Force workspaces to specific monitors when externals are attached.
+# In laptop-only mode, all three fall back to Built-in automatically.
+# Monitor regex: the patterns ^DELL P2722H.*$ / ^DELL U2412M.*$ assume that's how macOS reports them.
+# If workspaces 2-3 don't latch to the right Dell, run aerospace list-monitors and adjust the regexes.
+[workspace-to-monitor-force-assignment]
+1 = '^Built-in.*$'
+2 = '^DELL P2722H.*$'
+3 = '^DELL U2412M.*$'

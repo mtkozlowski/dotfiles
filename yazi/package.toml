@@ -1,0 +1,12 @@
+[[plugin.deps]]
+use = "yazi-rs/plugins:toggle-pane"
+rev = "1db18bb"
+hash = "9c7987da2d2a2120dac33abb64132004"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:zoom"
+rev = "5d5c480"
+hash = "fa268cb59989a87780605fdcfb8d99a9"
+
+[flavor]
+deps = []

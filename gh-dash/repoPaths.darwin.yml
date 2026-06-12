@@ -1,0 +1,7 @@
+# macOS repoPaths — repos live flat in ~/Desktop/Projects/<repo>, with a
+# subfolder for work repos. The template covers every flat repo; repos nested
+# in subfolders get an exact override below (add a line when you clone one).
+repoPaths:
+    ":owner/:repo": ~/Desktop/Projects/:repo
+    # Example override for a repo that lives in a subfolder:
+    # some-owner/some-repo: ~/Desktop/Projects/work/some-repo

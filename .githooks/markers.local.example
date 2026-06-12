@@ -1,0 +1,14 @@
+# Personal pre-commit markers — strings the hook must never let into a commit.
+#
+# Copy this file to markers.local (gitignored) and add your own, ONE REGEX PER LINE:
+# employer or product names, your username, internal hostnames, etc. Keeping them
+# here (out of the public repo) means the guard works without publishing the very
+# strings it protects.
+#
+# Lines starting with # and blank lines are ignored. Matching is case-insensitive
+# (grep -i). Put real values in markers.local, NOT in this tracked example.
+#
+# Examples (replace with your own in markers.local):
+# acme-corp
+# my-username
+# internal\.example\.tld

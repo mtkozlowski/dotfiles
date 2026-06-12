@@ -1,0 +1,161 @@
+# gh-dash config (shared base) — https://www.gh-dash.dev/configuration/
+#
+# This file holds everything EXCEPT the per-host `repoPaths:` block. The
+# active config is assembled by .zshrc.local from:
+#     config.base.yml  +  repoPaths.<host>.yml   →   $XDG_CACHE_HOME/gh-dash/config.yml
+# and selected via $GH_DASH_CONFIG. {{.RepoPath}} match order (from gh-dash):
+#   1. exact `owner/repo`  2. `owner/*` wildcard  3. `:owner/:repo` template
+#   4. else: dir gh-dash was launched from; if none, the command errors.
+
+# --- Sections -------------------------------------------------------------
+# Scoped to @me on purpose: a bare `is:open` searches all of GitHub (the
+# recipe's author hit 83M results). Most actionable first.
+prSections:
+  - title: Needs My Review
+    filters: is:open review-requested:@me
+  - title: Mine
+    filters: is:open author:@me
+  - title: Involved
+    filters: is:open involves:@me -author:@me
+
+issuesSections:
+  - title: Assigned
+    filters: is:open assignee:@me
+  - title: Mine
+    filters: is:open author:@me
+  - title: Involved
+    filters: is:open involves:@me -author:@me
+
+notificationsSections:
+  - title: All
+    filters: ""
+  - title: Review Requested
+    filters: reason:review-requested
+  - title: Participating
+    filters: reason:participating
+  - title: Mentioned
+    filters: reason:mention
+  - title: Assigned
+    filters: reason:assign
+
+repo:
+  branchesRefetchIntervalSeconds: 30
+  prsRefetchIntervalSeconds: 60
+
+defaults:
+  preview:
+    open: false
+    width: 60
+    height: 0.6
+    position: auto
+  prsLimit: 20
+  prApproveComment: LGTM
+  issuesLimit: 20
+  notificationsLimit: 20
+  view: prs
+  layout:
+    prs:
+      updatedAt:
+        width: 5
+      createdAt:
+        width: 5
+      repo:
+        width: 20
+      author:
+        width: 15
+      authorIcon:
+        hidden: false
+      labels:
+        width: 22
+        hidden: true
+      assignees:
+        width: 20
+        hidden: true
+      base:
+        width: 15
+        hidden: true
+      lines:
+        width: 15
+    issues:
+      updatedAt:
+        width: 5
+      createdAt:
+        width: 5
+      repo:
+        width: 15
+      creator:
+        width: 10
+      creatorIcon:
+        hidden: false
+      assignees:
+        width: 20
+        hidden: true
+  refetchIntervalMinutes: 30
+
+# --- Keybindings ----------------------------------------------------------
+# Each command runs in a shell, so `~` in {{.RepoPath}} is expanded and a
+# single-quoted string is the new tmux window's startup command (no `\;`
+# chaining needed — keeps these out of tmux's fussy semicolon handling).
+keybindings:
+  universal:
+    # G → lazygit for the repo under the cursor, in a new tmux window.
+    - key: G
+      name: lazygit
+      command: >
+        tmux new-window -n lazygit -c {{.RepoPath}} 'lazygit'
+  prs:
+    # Y → copy the PR URL to the system clipboard. Overrides the built-in
+    # copyurl, which shells out to a clipboard util (xclip/wl-copy/pbcopy)
+    # absent on the headless VPS — hence "no clipboard utilities available".
+    # Push it through `tmux set-buffer -w` (OSC 52) instead, the same path as
+    # tmux-thumbs: works locally (Ghostty) and over SSH, since set-clipboard
+    # is on and tmux forwards OSC 52 to the terminal. gh-dash has no
+    # {{.PrUrl}} var, so build the URL from {{.RepoName}}/{{.PrNumber}}.
+    - key: Y
+      name: copy url
+      command: >
+        tmux set-buffer -w -- 'https://github.com/{{.RepoName}}/pull/{{.PrNumber}}'
+    # C → isolated worktree for the PR (wt), then Claude Code pre-prompted
+    # to review it. Walk over to the new tmux window; the review's started.
+    # opencode alternative (you have the @reviewer agent set up), swap the
+    # inner command for:  wt switch pr:{{.PrNumber}} -x opencode -- "review this PR"
+    - key: C
+      name: claude review
+      command: >
+        tmux new-window -n "PR-{{.PrNumber}}" -c {{.RepoPath}}
+        'wt switch pr:{{.PrNumber}} -x claude --permission-mode auto --
+        "/code-review:code-review Review PR #{{.PrNumber}}: summarise the changes, then flag bugs, security issues and risky edge cases, and suggest concrete improvements."'
+    # O → open the PR in Octo (nvim) for hands-on human review/comments.
+    # Pass {{.RepoName}} (owner/repo) explicitly so Octo loads the PR via the
+    # gh API — no local clone needed and independent of cwd/repoPaths, so it
+    # works the same on macOS and Linux.
+    - key: O
+      name: octo review
+      command: >
+        tmux new-window -n "octo-{{.PrNumber}}"
+        'nvim -c "silent Octo pr edit {{.PrNumber}} {{.RepoName}}"'
+  issues:
+    # Y → copy the issue URL to the clipboard via OSC 52, for the same reason
+    # as the PRs binding above (no clipboard util on the VPS).
+    - key: Y
+      name: copy url
+      command: >
+        tmux set-buffer -w -- 'https://github.com/{{.RepoName}}/issues/{{.IssueNumber}}'
+
+# --- Look & feel ----------------------------------------------------------
+# No theme.colors block on purpose: gh-dash colors are static and would clash
+# with your macOS light/dark sync (nvim + tmux already follow it).
+theme:
+  ui:
+    sectionsShowCount: true
+    table:
+      showSeparator: true
+      compact: false
+
+pager:
+  diff: "delta --side-by-side"
+
+confirmQuit: false
+showAuthorIcons: true
+smartFilteringAtLaunch: true
+includeReadNotifications: true

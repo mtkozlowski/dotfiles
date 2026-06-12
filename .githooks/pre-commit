@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Pre-commit secret/PII guard for this dotfiles repo.
+#
+# Enable on a fresh clone with:
+#   git config core.hooksPath .githooks
+#
+# Two layers:
+#   1. gitleaks (if installed) — broad, known secret shapes.
+#   2. A zero-dependency fallback that scans staged content for generic secret
+#      shapes, plus any personal "never republish" patterns you keep in an
+#      untracked .githooks/markers.local (see markers.local.example).
+set -euo pipefail
+
+fail=0
+
+# 1. gitleaks (if installed) — scans the staged diff for known secret shapes.
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks protect --staged --redact --no-banner; then
+    echo "✗ gitleaks flagged a potential secret in the staged changes." >&2
+    fail=1
+  fi
+fi
+
+# 2. Zero-dependency fallback. Runs whether or not gitleaks is present.
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit $fail
+
+# Generic secret shapes — universal, contain nothing repo-specific.
+secret_re='-----BEGIN (RSA|OPENSSH|EC|DSA|PGP) PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[posu]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'
+
+# Personal markers (employer names, usernames, internal hosts) live OUTSIDE the
+# repo so they are never published. One regex per line in .githooks/markers.local
+# (gitignored); copy markers.local.example to start. Absent/empty → this layer is skipped.
+markers_file="$(dirname "$0")/markers.local"
+marker_re=""
+[ -f "$markers_file" ] && marker_re="$(grep -vE '^[[:space:]]*(#|$)' "$markers_file" | paste -sd '|' -)"
+
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  # Don't let the hook flag its own source files.
+  case "$f" in .githooks/*) continue ;; esac
+  if git show ":$f" | grep -nEi -e "$secret_re" >/dev/null 2>&1; then
+    echo "✗ Possible secret in staged file: $f" >&2
+    git show ":$f" | grep -nEi -e "$secret_re" | sed 's/^/    /' >&2
+    fail=1
+  fi
+  if [ -n "$marker_re" ] && git show ":$f" | grep -nEi -e "$marker_re" >/dev/null 2>&1; then
+    echo "✗ Personal/private marker in staged file: $f" >&2
+    git show ":$f" | grep -nEi -e "$marker_re" | sed 's/^/    /' >&2
+    fail=1
+  fi
+done <<< "$staged"
+
+if [ "$fail" -ne 0 ]; then
+  echo "" >&2
+  echo "Commit blocked. Remove the above, or if it is a genuine false positive," >&2
+  echo "bypass with: git commit --no-verify" >&2
+  exit 1
+fi

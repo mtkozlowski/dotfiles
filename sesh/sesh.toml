@@ -1,0 +1,9 @@
+#:schema https://raw.githubusercontent.com/joshmedeski/sesh/refs/heads/main/sesh.schema.json
+
+blacklist = ["scratch"]
+
+[[session]]
+name = "dotfiles"
+path = "~/dotfiles"
+startup_command = "nvim"
+# preview_command = "bat --color=always ~/dotfiles/.config/tmux/tmux.conf"

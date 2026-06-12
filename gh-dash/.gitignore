@@ -1,0 +1,3 @@
+
+# gh-dash writes a default here if $GH_DASH_CONFIG is unset; assembled version lives in $XDG_CACHE_HOME.
+config.yml

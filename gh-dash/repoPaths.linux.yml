@@ -1,0 +1,4 @@
+# Linux repoPaths — repos live flat in ~/projects. The template covers all of
+# them; add an exact override here only if a repo lives elsewhere on this box.
+repoPaths:
+    ":owner/:repo": ~/projects/:repo
