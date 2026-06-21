@@ -89,7 +89,9 @@ alias ltree="eza --tree --level=2  --icons --git"
 
 # brew
 alias bu='brew update'
-alias bup='brew upgrade'
+# bup: upgrade, then summarize what the upgrades introduce (see scripts/brew-upgrade-changes).
+# Use `bup --no-notes` or `BREW_NOTES=0 bup` to skip the agent.
+bup() { brew-upgrade-changes "$@" }
 
 # macos-only helpers
 if [[ "$OSTYPE" == darwin* ]]; then

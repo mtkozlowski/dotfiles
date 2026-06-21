@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Run `brew upgrade`, then summarize what the upgrades introduce via an agent.
+set -uo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$DIR/brew-changes-lib.sh"
+
+if ! command -v brew >/dev/null 2>&1; then
+  printf 'brew-changes: brew not found on PATH; nothing to do.\n' >&2
+  exit 0
+fi
+
+# Parse our own flag; forward everything else to brew.
+notes=1
+[ "${BREW_NOTES:-1}" = "0" ] && notes=0
+brew_args=()
+for a in "$@"; do
+  case "$a" in
+    --no-notes) notes=0 ;;
+    *) brew_args+=("$a") ;;
+  esac
+done
+
+state="$(bc_state_dir)"
+ts="$(date +%Y-%m-%d-%H%M%S)"
+raw="$state/$ts.upgrade.log"
+
+# Run the upgrade, stream to terminal AND capture to the raw log.
+brew upgrade "${brew_args[@]}" 2>&1 | tee "$raw"
+brew_rc="${PIPESTATUS[0]}"
+
+pkgs="$(bc_extract_upgrades "$raw")"
+if [ -z "$pkgs" ]; then
+  printf '\nbrew-changes: nothing upgraded.\n'
+  exit "$brew_rc"
+fi
+
+if [ "$notes" -eq 0 ]; then
+  printf '\nbrew-changes: %d package(s) upgraded (summary skipped). Raw log: %s\n' \
+    "$(printf '%s\n' "$pkgs" | grep -c ' -> ')" "$raw"
+  exit "$brew_rc"
+fi
+
+printf '\nbrew-changes: summarizing %d upgrade(s)...\n' \
+  "$(printf '%s\n' "$pkgs" | grep -c ' -> ')"
+bc_summarize "$pkgs" "$state/$ts.summary.md" || \
+  printf 'brew-changes: summary step failed; raw log saved: %s (retry: brew-changes-last)\n' "$raw" >&2
+
+exit "$brew_rc"

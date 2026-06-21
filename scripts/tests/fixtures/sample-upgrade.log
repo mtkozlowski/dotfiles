@@ -1,0 +1,20 @@
+==> Upgrading 14 outdated packages:
+util-linux 2.42.1 -> 2.42.2
+television 0.15.8 -> 0.15.9
+luajit 2.1.1780076327 -> 2.1.1781602682
+certifi 2026.5.20 -> 2026.6.17
+fmt 12.1.0 -> 12.2.0
+gh 2.94.0 -> 2.95.0
+worktrunk 0.57.0 -> 0.60.0
+tig 2.6.0 -> 2.6.1
+libffi 3.5.2 -> 3.6.0
+llhttp 9.4.1 -> 9.4.2
+cloudflared 2026.6.0 -> 2026.6.1
+carapace 1.7.0 -> 1.7.1
+node 26.3.0 -> 26.3.1
+jq 1.8.1 -> 1.8.2
+==> Running `brew cleanup`...
+Removing: /Users/x/Library/Caches/Homebrew/node--26.3.0... (12MB)
+==> Caveats
+==> node
+Bash completion has been installed to: -> see docs

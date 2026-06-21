@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Re-summarize the most recent `brew upgrade` log without re-running brew.
+set -uo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$DIR/brew-changes-lib.sh"
+
+state="$(bc_state_dir)"
+# Newest by filename (timestamps sort lexicographically).
+raw="$(ls -1 "$state"/*.upgrade.log 2>/dev/null | sort | tail -n1)"
+if [ -z "$raw" ]; then
+  printf 'brew-changes: no upgrade logs found in %s\n' "$state" >&2
+  exit 0
+fi
+
+pkgs="$(bc_extract_upgrades "$raw")"
+if [ -z "$pkgs" ]; then
+  printf 'brew-changes: no upgraded packages found in %s\n' "$raw" >&2
+  exit 0
+fi
+
+ts="$(basename "$raw" .upgrade.log)"
+printf 'brew-changes: re-summarizing %s\n' "$raw"
+bc_summarize "$pkgs" "$state/$ts.summary.md"

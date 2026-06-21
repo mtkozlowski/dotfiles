@@ -120,6 +120,19 @@ On a barebones VPS: leave `.zshrc.local` mostly empty. On a Mac: uncomment
 GUI app blocks. On a JS-heavy box: uncomment nvm/bun. On work hardware:
 add the work shortcuts and IDE aliases.
 
+## brew upgrade summaries
+
+`bup` runs `brew upgrade` and then uses the `claude` CLI to summarize what the
+upgrades introduce (critical fixes, new features, breaking changes).
+
+- Summaries and raw logs are saved under `${XDG_STATE_HOME:-~/.local/state}/brew-changes/`.
+- `bup --no-notes` (or `BREW_NOTES=0 bup`) upgrades without the summary.
+- `BREW_NOTES_MODEL=opus bup` overrides the model (default: `sonnet`).
+- `brew-changes-last` re-generates the summary for the most recent upgrade.
+
+Requires `brew` and the `claude` CLI; on machines without them, `bup` degrades
+gracefully (plain upgrade, or a no-op note).
+
 ## Adding new stuff later
 
 Before adding a line to tracked `.zshrc`, ask: *is this useful on every
