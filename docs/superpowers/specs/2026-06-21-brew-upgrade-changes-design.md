@@ -61,7 +61,8 @@ Responsibilities:
   `BREW_NOTES_MODEL` (default `sonnet`).
 - **Deliver:** capture the agent's stdout. Save it to
   `${XDG_STATE_HOME:-$HOME/.local/state}/brew-changes/<TS>.summary.md` (same `<TS>`
-  as the raw log), and also print it to the terminal.
+  as the raw log), print it to the terminal, and also print the saved summary
+  file path (on success too, not only on error).
 - **Interruptible:** the agent step can be Ctrl-C'd without losing the raw log
   (which is already written). On interrupt, exit cleanly with a note that the raw
   log is saved and `brew-changes-last` can re-run the summary.
@@ -85,11 +86,12 @@ delegator so logic lives in the versioned script, not inline in `.zshrc`.)
 
 ### Bonus: `brew-changes-last`
 
-A small companion command that re-summarizes the most recent `<TS>.upgrade.log`
-without re-running `brew upgrade`. Reuses the same agent-invocation and delivery
-logic as the main script (factored into a shared shell function or a `--re-run`
-flag — chosen at implementation). Lets the user regenerate a summary after a
-Ctrl-C or to retry on network failure.
+A **separate** script (`scripts/brew-changes-last`) that re-summarizes the most
+recent `<TS>.upgrade.log` without re-running `brew upgrade`. It reuses the same
+agent-invocation and delivery logic as the main script; that shared logic is
+factored into a sourceable helper (e.g. `scripts/brew-changes-lib.sh`) so both
+scripts call it rather than duplicating it. Lets the user regenerate a summary
+after a Ctrl-C or to retry on network failure.
 
 ## Agent prompt (intent, not final wording)
 
