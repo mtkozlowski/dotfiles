@@ -123,7 +123,7 @@ keybindings:
       name: claude review
       command: >
         tmux new-window -n "PR-{{.PrNumber}}" -c {{.RepoPath}}
-        'wt switch pr:{{.PrNumber}} -x claude --permission-mode auto --
+        'wt switch pr:{{.PrNumber}} -x claude -- --permission-mode auto
         "/code-review:code-review Review PR #{{.PrNumber}}: summarise the changes, then flag bugs, security issues and risky edge cases, and suggest concrete improvements."'
     # O → open the PR in Octo (nvim) for hands-on human review/comments.
     # Pass {{.RepoName}} (owner/repo) explicitly so Octo loads the PR via the
