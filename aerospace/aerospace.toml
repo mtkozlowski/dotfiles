@@ -17,6 +17,8 @@ on-focused-monitor-changed = ['move-mouse monitor-lazy-center']
 automatically-unhide-macos-hidden-apps = false
 
 # Float rules
+# when needed to add a new window to rules below
+# you can identify the app id by using `osascript -e 'id of app "Music"'`
 [[on-window-detected]]
 if.app-name-regex-substring = 'finder'
 run = 'layout floating'
@@ -47,6 +49,10 @@ run = 'layout floating'
 
 [[on-window-detected]]
 if.app-id = 'com.hnc.Discord'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.apple.Music'
 run = 'layout floating'
 # Auto-place apps on their home workspace so they ride monitor changes
 #
