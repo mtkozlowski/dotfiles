@@ -8,5 +8,10 @@ use = "yazi-rs/plugins:zoom"
 rev = "5d5c480"
 hash = "fa268cb59989a87780605fdcfb8d99a9"
 
+[[plugin.deps]]
+use = "uhs-robert/sshfs"
+rev = "a8b8903"
+hash = "8c1b36103121a66b37308afaf7124575"
+
 [flavor]
 deps = []
