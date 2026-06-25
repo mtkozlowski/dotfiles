@@ -6,6 +6,21 @@
 # Rule of thumb: if a block depends on a specific app being installed on THIS
 # machine (rather than on the OS), it belongs here, not in tracked .zshrc.
 
+# --- Private overlay (companion repo + secret manager) ------------------------
+# This file is the per-machine bootstrap. Anything private or worth syncing lives
+# OUTSIDE the public repo, in two places:
+#
+#   1. Companion repo — a PRIVATE git repo (e.g. ~/.dotfiles-private) holding work
+#      aliases, private functions, and gh-dash work repo paths. Synced across
+#      machines via its own remote. Source its entrypoint here:
+# [[ -f "$HOME/.dotfiles-private/init.zsh" ]] && source "$HOME/.dotfiles-private/init.zsh"
+#
+#   2. Secret manager — actual credentials (see Secrets section below). Never
+#      commit real secrets to any repo, public or private.
+#
+# Machine-local-only scripts (not worth syncing) can also live in the gitignored
+# dotfiles subdir zsh/local/ and be sourced from there.
+
 # --- Work / project shortcuts -------------------------------------------------
 
 # Example: a one-shot "update my work stack" alias for a repo on this machine.
@@ -68,6 +83,9 @@
 # config.base.yml + repoPaths.<host>.yml at shell startup. Uncomment the
 # anonymous function for THIS machine's flavour.
 #
+# Private work repo paths go in an untracked gh-dash/repoPaths.local.yml (gitignored,
+# kept in the companion repo); the assembly appends it automatically if present.
+#
 # Linux (repos flat in ~/projects):
 # () {
 #   local d="${XDG_CONFIG_HOME:-$HOME/.config}/gh-dash"
@@ -82,7 +100,9 @@
 #     return 1
 #   fi
 #   mkdir -p "${out:h}"
-#   cat "$d/config.base.yml" "$d/repoPaths.linux.yml" > "$out"
+#   local frags=("$d/config.base.yml" "$d/repoPaths.linux.yml")
+#   [[ -r "$d/repoPaths.local.yml" ]] && frags+=("$d/repoPaths.local.yml")
+#   cat "${frags[@]}" > "$out"
 #   export GH_DASH_CONFIG="$out"
 # }
 #
@@ -100,10 +120,16 @@
 #     return 1
 #   fi
 #   mkdir -p "${out:h}"
-#   cat "$d/config.base.yml" "$d/repoPaths.darwin.yml" > "$out"
+#   local frags=("$d/config.base.yml" "$d/repoPaths.darwin.yml")
+#   [[ -r "$d/repoPaths.local.yml" ]] && frags+=("$d/repoPaths.local.yml")
+#   cat "${frags[@]}" > "$out"
 #   export GH_DASH_CONFIG="$out"
 # }
 
 # --- Secrets ------------------------------------------------------------------
-# Prefer 1Password CLI, pass, or macOS Keychain. Last resort:
-# export OPENAI_API_KEY="sk-..."
+# Fetch credentials from a secret manager at shell init — never hard-code them.
+# 1Password CLI (op) example; gate on the binary so machines without op don't error:
+# command -v op >/dev/null && export OPENAI_API_KEY="$(op read 'op://Private/OpenAI/credential')"
+#
+# Alternatives: pass (`export KEY="$(pass show api/openai)"`), sops+age, macOS Keychain.
+# Last resort only (avoid — leaks into env/history): export OPENAI_API_KEY="sk-..."
