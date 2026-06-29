@@ -1,0 +1,22 @@
+==> Downloading bottle manifests
+✔︎ Bottle Manifest libnghttp3 (1.17.0)
+✔︎ Bottle Manifest starship (1.26.0)
+==> Would upgrade 3 outdated packages
+sqlite       3.53.2 -> 3.53.3 (3MB)
+libnghttp3   1.16.0 -> 1.17.0 (218.7KB)
+starship     1.25.1 -> 1.26.0 (5.2MB)
+==> Upgrading 3 outdated packages:
+sqlite       3.53.2 -> 3.53.3 (3MB)
+libnghttp3   1.16.0 -> 1.17.0 (218.7KB)
+starship     1.25.1 -> 1.26.0 (5.2MB)
+==> Upgrading sqlite
+  3.53.2 -> 3.53.3
+==> Pouring sqlite--3.53.3.x86_64_linux.bottle.tar.gz
+🍺  /home/linuxbrew/.linuxbrew/Cellar/sqlite/3.53.3: 13 files, 6.9MB
+==> Caveats
+zsh completions have been installed to:
+  /home/linuxbrew/.linuxbrew/share/zsh/site-functions
+==> Upgraded 3 outdated packages
+sqlite       3.53.2 -> 3.53.3
+libnghttp3   1.16.0 -> 1.17.0
+starship     1.25.1 -> 1.26.0

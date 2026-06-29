@@ -34,6 +34,22 @@ case "$extracted" in
   *) ok "extract: excludes non-package lines";;
 esac
 
+# --- bc_extract_upgrades on real Linux/brew output (padded columns, sizes,
+#     repeated blocks) ---
+linux_extracted="$(bc_extract_upgrades "$FIXTURES/sample-upgrade-linux.log")"
+linux_count="$(printf '%s\n' "$linux_extracted" | grep -c ' -> ' || true)"
+assert_eq "extract(linux): dedupes to 3 package lines" "3" "$linux_count"
+assert_contains "extract(linux): normalizes padded line" \
+  "starship 1.25.1 -> 1.26.0" "$linux_extracted"
+case "$linux_extracted" in
+  *'('*) nope "extract(linux): strips trailing size" "size leaked: $linux_extracted";;
+  *) ok "extract(linux): strips trailing size";;
+esac
+case "$linux_extracted" in
+  *Caveats*|*Pouring*|*Cellar*) nope "extract(linux): excludes non-package lines" "leaked";;
+  *) ok "extract(linux): excludes non-package lines";;
+esac
+
 # --- bc_extract_upgrades on empty input ---
 empty_log="$(mktemp)"; printf 'Already up-to-date.\n' > "$empty_log"
 empty_out="$(bc_extract_upgrades "$empty_log")"

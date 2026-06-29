@@ -8,10 +8,16 @@ bc_state_dir() {
 }
 
 # bc_extract_upgrades <logfile>: print "name old -> new" lines only.
+# brew pads columns with runs of spaces and may append a " (size)"; it also
+# prints the same package list in several blocks (would-upgrade / upgrading /
+# upgraded). So match loosely, drop the size, collapse whitespace, and dedupe.
 bc_extract_upgrades() {
   local log="$1"
   [ -f "$log" ] || return 0
-  grep -E '^[^[:space:]]+ [^[:space:]]+ -> [^[:space:]]+$' "$log" || true
+  grep -E '^[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+->[[:space:]]+[^[:space:]]+([[:space:]]+\([^)]*\))?[[:space:]]*$' "$log" \
+    | sed -E 's/[[:space:]]+\([^)]*\)[[:space:]]*$//' \
+    | awk '{ $1=$1; print }' \
+    | awk '!seen[$0]++'
 }
 
 # bc_summarize <pkg_list_text> <summary_outfile>
