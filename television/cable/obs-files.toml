@@ -1,0 +1,29 @@
+[metadata]
+name = "obs"
+description = "Browse Obsidian notes from 'obs files' and open the selected note in Neovim"
+requirements = ["obsidian", "nvim", "bat"]
+
+# `obsidian files` emits paths relative to the vault root, so the vault path is
+# prepended at preview/edit time via the shell command substitution below.
+#
+# Alternative: resolve the vault path ONCE here in [source] and emit absolute
+# paths, so preview/edit can use a plain '{}'. Faster (no `obsidian` call per
+# preview), but the picker then shows long absolute paths instead of nice
+# relative ones. To use it, swap the lines below and simplify preview/edit to
+# `command = "bat -n --color=always '{}'"` and `command = "nvim '{}'"`:
+#   command = "vault=$(obsidian vault info=path); obsidian files | sed \"s|^|$vault/|\""
+[source]
+command = "obsidian files"
+
+[preview]
+command = 'bat -n --color=always "$(obsidian vault info=path)/{}"'
+env = { BAT_THEME = "ansi" }
+
+[keybindings]
+enter = "actions:edit"
+
+[actions.edit]
+description = "Open the selected note in Neovim"
+command = 'nvim "$(obsidian vault info=path)/{}"'
+# shell = "nu"
+mode = "execute"
