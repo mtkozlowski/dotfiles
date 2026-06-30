@@ -12,7 +12,7 @@ atuin/atuin-receipt.json
 # Per-machine overrides — tracked file is the *.local.example template only.
 *.local
 !*.local.example
-.a5c/**
+**/.a5c/**
 
 # Private overlay — never published. Real content lives in the companion repo /
 # secret manager; these are surfaced locally via the folded stow symlink.

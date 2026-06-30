@@ -77,6 +77,12 @@
 # opencode
 # [[ -d "$HOME/.opencode/bin" ]] && export PATH="$HOME/.opencode/bin:$PATH"
 
+# --- starship host label ------------------------------------------------------
+# starship.toml is public, so it carries no real hostnames or per-machine aliases.
+# Set a short label for THIS machine here and the prompt's env_var module shows it
+# (unset = the hostname slot stays empty).
+# export STARSHIP_HOST_LABEL=LABEL
+
 # --- gh-dash per-host config --------------------------------------------------
 # gh-dash reads one config.yml. To keep section/theme/keybindings shared but
 # `repoPaths:` host-specific, the active config is assembled from
