@@ -2,6 +2,7 @@
 --ignore=.stowrc
 --ignore=.DS_Store
 --ignore=.git
+--ignore=.githooks
 --ignore=.gitignore
 --ignore=.*\.local\.example
 --ignore=.*\.local

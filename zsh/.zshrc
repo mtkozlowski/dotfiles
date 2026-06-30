@@ -1,8 +1,16 @@
 setopt prompt_subst
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
-autoload bashcompinit && bashcompinit
+# Completion: cache the dump under $XDG_CACHE_HOME (keeps it out of the repo)
+# and only run the slow security scan when the dump is older than 24h.
+ZCOMPDUMP="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump-$ZSH_VERSION"
+[[ -d "${ZCOMPDUMP:h}" ]] || mkdir -p "${ZCOMPDUMP:h}"
 autoload -Uz compinit
-compinit
+if [[ -n $ZCOMPDUMP(#qN.mh+24) ]]; then
+    compinit -d "$ZCOMPDUMP"
+else
+    compinit -C -d "$ZCOMPDUMP"
+fi
+autoload -Uz bashcompinit && bashcompinit
 
 if [[ -f "/opt/homebrew/bin/brew" ]]; then
   # macOS Apple Silicon
@@ -23,14 +31,25 @@ zstyle ':completion:*' menu select search
 zstyle ':completion:*' list-prompt ''
 source <(carapace _carapace)
 
-if command -v brew >/dev/null 2>&1; then
-    # Use atuin's DB for inline suggestions so the ghost text and Ctrl-R
-    # popup share one source of truth (zsh's $HISTFILE can drift from atuin,
-    # e.g. when non-interactive shells append history but skip atuin's hooks).
-    ZSH_AUTOSUGGEST_STRATEGY=(atuin)
-    source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-    source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
-fi
+# Plugins: self-installing, no plugin manager, identical on macOS + Linux.
+# (Previously these were sourced only when Homebrew was present, so a bare
+# Linux VPS got neither autosuggestions nor syntax highlighting.)
+# `zplugin-update` pulls every plugin; swap the last line for
+# zsh-users/zsh-syntax-highlighting to fall back to the classic highlighter.
+ZPLUGINDIR="${ZDOTDIR:-$HOME/.config/zsh}/plugins"
+_zpload() {
+    local dir="$ZPLUGINDIR/${1##*/}"
+    [[ -d "$dir" ]] || git clone --depth=1 "https://github.com/$1" "$dir"
+    source "$dir/${1##*/}.plugin.zsh"
+}
+zplugin-update() { for d in "$ZPLUGINDIR"/*/; do git -C "$d" pull --ff-only; done }
+
+# Use atuin's DB for inline suggestions so the ghost text and Ctrl-R popup
+# share one source of truth (zsh's $HISTFILE can drift from atuin, e.g. when
+# non-interactive shells append history but skip atuin's hooks).
+ZSH_AUTOSUGGEST_STRATEGY=(atuin)
+_zpload zsh-users/zsh-autosuggestions
+_zpload zdharma-continuum/fast-syntax-highlighting   # must be sourced last
 bindkey '^w' autosuggest-execute
 bindkey '^e' autosuggest-accept
 bindkey '^u' autosuggest-toggle
@@ -42,7 +61,25 @@ bindkey '^j' down-line-or-search
 export LANG=en_US.UTF-8
 export EDITOR="$(command -v nvim || command -v vim)"
 
-alias la=tree
+# bat: on Debian/Ubuntu the binary ships as `batcat` (and fd as `fdfind`),
+# because of a package name clash. Resolve each to a single name that works on
+# every machine, so `bat`/`fd` behave identically on macOS and the VPSes.
+if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
+    alias bat='batcat'
+    BAT_BIN='batcat'
+elif command -v bat >/dev/null 2>&1; then
+    BAT_BIN='bat'
+fi
+if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
+    alias fd='fdfind'
+fi
+
+# Render man pages through bat (syntax-highlighted, paged). Uses the resolved
+# binary name, not the alias, because $MANPAGER runs in a non-interactive shell.
+if [[ -n "$BAT_BIN" ]]; then
+    export MANPAGER="sh -c 'col -bx | $BAT_BIN -l man -p'"
+    export MANROFFOPT="-c"   # avoids formatting glitches with newer groff
+fi
 
 # VI Mode!!!
 bindkey jj vi-cmd-mode
@@ -86,12 +123,24 @@ alias ~="cd ~"
 alias l="eza -l --icons --git -a"
 alias lt="eza --tree --level=2 --long --icons --git"
 alias ltree="eza --tree --level=2  --icons --git"
+compdef eza=ls   # let eza (and the eza-backed aliases) reuse ls's completions
 
 # brew
 alias bu='brew update'
 # bup: upgrade, then summarize what the upgrades introduce (see scripts/brew-upgrade-changes).
 # Use `bup --no-notes` or `BREW_NOTES=0 bup` to skip the agent.
-bup() { brew-upgrade-changes "$@" }
+# After a successful upgrade it also refreshes the tracked Brewfile (brewdump).
+bup() { brew-upgrade-changes "$@" && brewdump }
+
+# brewdump: regenerate homebrew/Brewfile from the current install set and show
+# the diff, so new/removed packages get reviewed before committing. Runs after
+# `bup`; also callable directly. macOS only -- dumping on a Linux box would drop
+# the macOS casks and clobber the shared Brewfile.
+brewdump() {
+    [[ "$OSTYPE" == darwin* ]] || { print -u2 "brewdump: macOS only -- skipped."; return 0; }
+    brew bundle dump --file="$HOME/dotfiles/homebrew/Brewfile" --force
+    git -C "$HOME/dotfiles" diff -- homebrew/Brewfile
+}
 
 # macos-only helpers
 if [[ "$OSTYPE" == darwin* ]]; then
