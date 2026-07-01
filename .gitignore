@@ -29,3 +29,6 @@ zsh/local/
 gh-dash/repoPaths.local.yml
 # personal pre-commit marker regexes:
 .githooks/markers.local
+
+gh/hosts.yml
+ghostty/ghostty-shaders

@@ -1,0 +1,17 @@
+# theme = Monokai Pro Spectrum
+# theme = Catppuccin Mocha
+# theme = light:Rose Pine Dawn,dark:catppuccin-mocha.conf
+theme = light:Rose Pine Dawn,dark:Gruvbox Material Dark
+macos-option-as-alt = left
+# keybind = alt+left=unbind
+# keybind = alt+right=unbind
+keybind = shift+enter=text:\x1b\r
+# font-size = 19
+background-blur-radius = 20
+# background-opacity = 0.7
+mouse-hide-while-typing = true
+window-decoration = false
+font-family = JetBrainsMonoNL Nerd Font Mono
+
+# https://ghostty.org/docs/config/reference#shell-integration-features
+shell-integration-features = ssh-env
