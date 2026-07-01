@@ -32,3 +32,4 @@ gh-dash/repoPaths.local.yml
 
 gh/hosts.yml
 ghostty/ghostty-shaders
+worktrunk/config.toml.lock

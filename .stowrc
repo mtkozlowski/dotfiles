@@ -6,3 +6,5 @@
 --ignore=.gitignore
 --ignore=.*\.local\.example
 --ignore=.*\.local
+--ignore=.superpowers
+--ignore=.a5c
