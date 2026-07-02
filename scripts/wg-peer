@@ -1,0 +1,339 @@
+#!/bin/bash
+set -euo pipefail
+
+# wg-peer — generate WireGuard peers and assemble combined multi-server client configs.
+#
+# Why three subcommands: macOS/iOS run only one tunnel at a time, so to reach
+# several servers at once you need ONE client config with multiple [Peer] blocks.
+# That means one client keypair registered on every server — and a script on one
+# server can't edit another. So: keygen once, `add` on each server, then assemble.
+#
+#   wg-peer keygen <name>
+#       Run once (anywhere). Writes <name>.key (private, 0600) and prints the
+#       public key to register on each server.
+#
+#   wg-peer add <name> <peer-ip/cidr> <client-pubkey> [opts]   (run on each SERVER, as root)
+#       Appends a labeled [Peer] to the server's wg0.conf, hot-reloads, and emits
+#       a <label>.fragment file describing how the client reaches THIS server.
+#       opts:
+#         --conf PATH        server config (default: /etc/wireguard/wg0.conf)
+#         --label NAME       fragment label / [Peer] comment (default: hostname)
+#         --endpoint H[:P]   client-facing endpoint. Recommended to set explicitly.
+#                            Default: source IP from the local routing table + ListenPort;
+#                            only if that looks private/NATed does it fall back to a
+#                            third-party lookup (which reveals this server's IP). For an
+#                            IPv6 literal use bracket form: [2001:db8::1]:51820
+#         --route CIDR[,..]  AllowedIPs the client routes here (default: server's own subnet,
+#                            IPv4 only — pass --route for IPv6). Use 0.0.0.0/0 for a full
+#                            tunnel. Each server must own a DISTINCT subnet: WireGuard maps
+#                            every AllowedIPs prefix to exactly one peer.
+#
+#   wg-peer assemble <out-name> --key <name>.key [opts] <fragment>...   (run on the CLIENT)
+#       Stitches one [Interface] + every fragment's [Peer] into <out-name>.conf.
+#       opts:
+#         --dns IP[,IP]      add a DNS line
+#         --qr               also print a QR code (needs qrencode)
+#
+# NOTES / SECURITY
+#   * Distinct subnets: because the client stitches every server into one interface,
+#     no two servers may advertise the same AllowedIPs prefix. Give each its own subnet
+#     (e.g. 10.0.0.0/24, 10.1.0.0/24, ...). 'assemble' refuses to build a config with
+#     duplicate prefixes and warns on overlapping ones.
+#   * Fragments carry a preshared key in cleartext. Move them server->client over a
+#     secure channel (scp/age) and delete them once 'assemble' has run.
+#   * Extending later: keygen ONCE and keep <name>.key + <name>.pub. To add a server,
+#     run 'add' on the new box only (existing servers are untouched), then re-run
+#     'assemble' with all fragments into a new out-name.
+#   * Automatic subnet routing and endpoint autodetection are IPv4-only; pass --route
+#     and --endpoint explicitly for IPv6.
+
+PROG=$(basename "$0")
+
+die()  { echo "Error: $*" >&2; exit 1; }
+usage() {
+    grep '^#' "$0" | sed 's/^# \{0,1\}//;1d' >&2
+    exit "${1:-1}"
+}
+
+# Every value here can originate from a parsed config or a fragment file, so octets
+# and prefixes MUST be validated as plain integers before touching $(( )): bash
+# arithmetic recursively evaluates variable contents, so an unchecked token like
+# 'x[$(cmd)]' would execute cmd. Guard, then force base-10 with 10#.
+
+# ip/prefix -> network/prefix  (IPv4)
+ipv4_network() {
+    local cidr=$1 ip prefix a b c d o ipnum mask net
+    ip=${cidr%/*}; prefix=${cidr#*/}
+    IFS=. read -r a b c d <<<"$ip"
+    for o in "$a" "$b" "$c" "$d" "$prefix"; do
+        case "$o" in ''|*[!0-9]*) die "invalid IPv4 CIDR: $cidr";; esac
+    done
+    [ "$prefix" -le 32 ] || die "invalid prefix in: $cidr"
+    ipnum=$(( (10#$a<<24)|(10#$b<<16)|(10#$c<<8)|10#$d ))
+    if [ "$prefix" -eq 0 ]; then mask=0; else mask=$(( (0xFFFFFFFF << (32-prefix)) & 0xFFFFFFFF )); fi
+    net=$(( ipnum & mask ))
+    printf '%d.%d.%d.%d/%d\n' $(( (net>>24)&255 )) $(( (net>>16)&255 )) $(( (net>>8)&255 )) $(( net&255 )) "$prefix"
+}
+
+is_ipv6() { case "$1" in *:*) return 0;; *) return 1;; esac; }
+
+# ipv4 address (CIDR ok) -> integer, or return 1 if any octet isn't a plain number.
+ipv4_to_int() {
+    local a b c d o; IFS=. read -r a b c d <<<"${1%/*}"
+    for o in "$a" "$b" "$c" "$d"; do
+        case "$o" in ''|*[!0-9]*) return 1;; esac
+    done
+    echo $(( (10#$a<<24)|(10#$b<<16)|(10#$c<<8)|10#$d ))
+}
+
+# Do two IPv4 CIDRs share any address? (used only for a soft warning) Fails safe:
+# any non-numeric octet/prefix -> "no overlap" rather than evaluating it.
+cidrs_overlap() {
+    local xi xp yi yp p mask
+    xi=$(ipv4_to_int "$1") || return 1
+    yi=$(ipv4_to_int "$2") || return 1
+    xp=${1#*/}; yp=${2#*/}
+    case "$xp" in ''|*[!0-9]*) return 1;; esac
+    case "$yp" in ''|*[!0-9]*) return 1;; esac
+    p=$xp; [ "$yp" -lt "$p" ] && p=$yp
+    [ "$p" -eq 0 ] && return 0
+    mask=$(( (0xFFFFFFFF << (32-p)) & 0xFFFFFFFF ))
+    [ $(( xi & mask )) -eq $(( yi & mask )) ]
+}
+
+# RFC1918 / loopback / link-local / CGNAT — i.e. not a usable public endpoint.
+is_private_ipv4() {
+    case "$1" in
+        10.*|127.*|169.254.*|192.168.*) return 0;;
+        172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 0;;
+        100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) return 0;;
+        *) return 1;;
+    esac
+}
+
+# Source IPv4 the kernel would use to reach the public internet — no packets sent,
+# no third party contacted (pure routing-table lookup).
+detect_local_ipv4() {
+    ip -4 route get 1.1.1.1 2>/dev/null \
+        | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}'
+}
+
+cmd_keygen() {
+    local name=${1:-}
+    [ -n "$name" ] || usage
+    local keyfile="$name.key" pubfile="$name.pub"
+    [ -e "$keyfile" ] && die "$keyfile already exists — refusing to overwrite"
+    ( umask 077; wg genkey >"$keyfile" )
+    wg pubkey <"$keyfile" >"$pubfile"
+    echo "Client identity written:"
+    echo "  private : $keyfile  (keep on the client only; feed to 'assemble')"
+    echo "  public  : $pubfile"
+    echo
+    echo "Register this public key on each server:"
+    echo "  $(cat "$pubfile")"
+}
+
+cmd_add() {
+    [ "$(id -u)" -eq 0 ] || die "'add' edits /etc/wireguard and reloads wg — run with sudo"
+
+    local name=${1:-} peerip=${2:-} clientpub=${3:-}
+    [ -n "$name" ] && [ -n "$peerip" ] && [ -n "$clientpub" ] || usage
+    shift 3 || true
+
+    local conf=/etc/wireguard/wg0.conf label endpoint="" route=""
+    label=$(hostname -s 2>/dev/null || hostname)
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --conf)     conf=$2; shift 2;;
+            --label)    label=$2; shift 2;;
+            --endpoint) endpoint=$2; shift 2;;
+            --route)    route=$2; shift 2;;
+            *) die "unknown option: $1";;
+        esac
+    done
+    [ -f "$conf" ] || die "server config not found: $conf"
+    case "$peerip" in */*) ;; *) peerip="$peerip/32";; esac
+
+    local iface; iface=$(basename "$conf" .conf)
+
+    # syncconf only works on a live interface — bail before mutating the config.
+    wg show "$iface" >/dev/null 2>&1 \
+        || die "interface '$iface' is not up — bring it up first (e.g. 'wg-quick up $iface')"
+
+    local srvkey srvpub port srvaddr
+    # Split on the FIRST '=' only — base64 keys end in '=', so -F'=' would truncate them.
+    srvkey=$(awk '/^[[:space:]]*PrivateKey[[:space:]]*=/{sub(/^[^=]*=[[:space:]]*/,""); sub(/[[:space:]]+$/,""); print; exit}' "$conf")
+    [ -n "$srvkey" ] || die "no PrivateKey in $conf"
+    srvpub=$(wg pubkey <<<"$srvkey" 2>/dev/null) || die "PrivateKey in $conf is not a valid WireGuard key"
+    [ -n "$srvpub" ] || die "PrivateKey in $conf is not a valid WireGuard key"
+    port=$(awk -F'= *' '/^[[:space:]]*ListenPort/{print $2; exit}' "$conf"); port=${port//[[:space:]]/}; port=${port:-51820}
+    srvaddr=$(awk -F'= *' '/^[[:space:]]*Address/{print $2; exit}' "$conf"); srvaddr=${srvaddr%%,*}; srvaddr=${srvaddr//[[:space:]]/}
+
+    # Default client route to this server = the server's own subnet (split tunnel, IPv4 only).
+    if [ -z "$route" ]; then
+        [ -n "$srvaddr" ] || die "no Address in $conf — cannot derive a route; pass --route CIDR[,...]"
+        is_ipv6 "$srvaddr" && die "server Address is IPv6 ($srvaddr); auto subnet routing is IPv4-only — pass --route CIDR[,...]"
+        route=$(ipv4_network "$srvaddr")
+    fi
+
+    # Default endpoint = local source IP + ListenPort; third-party lookup only as a fallback.
+    if [ -z "$endpoint" ]; then
+        local ip; ip=$(detect_local_ipv4)
+        if [ -n "$ip" ] && ! is_private_ipv4 "$ip"; then
+            endpoint="$ip:$port"
+        else
+            echo "Warning: no public IP found locally; querying api.ipify.org (this reveals the server IP to a third party). Pass --endpoint to avoid." >&2
+            ip=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)
+            [ -n "$ip" ] || die "could not autodetect public IP — pass --endpoint HOST[:PORT]"
+            endpoint="$ip:$port"
+        fi
+    fi
+    # Append the port unless one is already present. IPv6 literals must be bracketed.
+    case "$endpoint" in
+        \[*\]:*)  ;;                                # [v6]:port
+        \[*\])    endpoint="$endpoint:$port";;      # [v6]  -> add port
+        *:*:*)    endpoint="[$endpoint]:$port";;    # bare v6 literal -> bracket + port
+        *:*)      ;;                                # host:port or v4:port
+        *)        endpoint="$endpoint:$port";;      # bare host/v4 -> add port
+    esac
+
+    # Exact-match against existing peer keys. WG keys are base64 (end in '='), so split
+    # on the first '=' only and compare as fixed strings — never as a regex.
+    if awk '/^[[:space:]]*PublicKey[[:space:]]*=/{sub(/^[^=]*=[[:space:]]*/,""); sub(/[[:space:]]+$/,""); print}' "$conf" \
+        | grep -Fxq "$clientpub"; then
+        die "that client key is already a peer in $conf"
+    fi
+
+    local psk; psk=$(wg genpsk)
+    cp -a "$conf" "$conf.bak.$(date +%s 2>/dev/null || echo backup)" 2>/dev/null || cp -a "$conf" "$conf.bak"
+
+    {
+        echo ""
+        echo "# $name"
+        echo "[Peer]"
+        echo "PublicKey = $clientpub"
+        echo "PresharedKey = $psk"
+        echo "AllowedIPs = $peerip"
+    } >>"$conf"
+
+    wg syncconf "$iface" <(wg-quick strip "$iface")
+    echo "Added peer '$name' ($peerip) to $iface and reloaded." >&2
+
+    # Client-side fragment. #ADDR lines are consumed by 'assemble' for the [Interface].
+    local frag="$label.fragment"
+    {
+        echo "#ADDR $peerip"
+        echo "[Peer]"
+        echo "# $label"
+        echo "PublicKey = $srvpub"
+        echo "PresharedKey = $psk"
+        echo "Endpoint = $endpoint"
+        echo "AllowedIPs = $route"
+        echo "PersistentKeepalive = 25"
+    } >"$frag"
+    chmod 600 "$frag"
+    echo "Wrote client fragment: $frag" >&2
+    echo "  Contains a preshared key — copy to the client over a secure channel and delete after 'assemble'." >&2
+}
+
+cmd_assemble() {
+    local out=${1:-}
+    [ -n "$out" ] || usage
+    shift
+    local keyfile="" dns="" qr=0 frags=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --key) keyfile=$2; shift 2;;
+            --dns) dns=$2; shift 2;;
+            --qr)  qr=1; shift;;
+            -*)    die "unknown option: $1";;
+            *)     frags+=("$1"); shift;;
+        esac
+    done
+    [ -n "$keyfile" ] || die "--key <name>.key is required"
+    [ -f "$keyfile" ] || die "key file not found: $keyfile"
+    [ "${#frags[@]}" -gt 0 ] || die "give at least one fragment file"
+
+    local outfile="$out.conf"
+    [ -e "$outfile" ] && die "$outfile already exists — refusing to overwrite"
+
+    # Gather all #ADDR lines into the single [Interface] Address.
+    local addrs=()
+    local f
+    for f in "${frags[@]}"; do
+        [ -f "$f" ] || die "fragment not found: $f"
+        while IFS= read -r line; do
+            case "$line" in "#ADDR "*) addrs+=("${line#\#ADDR }");; esac
+        done <"$f"
+    done
+    [ "${#addrs[@]}" -gt 0 ] || die "no #ADDR lines found in fragments"
+    local addr_csv; addr_csv=$(IFS=,; echo "${addrs[*]}"); addr_csv=${addr_csv//,/, }
+
+    # Collect every AllowedIPs prefix. WireGuard maps each prefix to exactly one peer,
+    # so exact duplicates across fragments are fatal; differing-length overlaps are legal
+    # (longest-prefix match) but usually a mistake, so warn.
+    local allowed=() val part
+    for f in "${frags[@]}"; do
+        while IFS= read -r line; do
+            case "$line" in
+                AllowedIPs*=*)
+                    val=${line#*=}; val=${val//[[:space:]]/}
+                    IFS=, read -ra part <<<"$val"
+                    allowed+=("${part[@]}")
+                    ;;
+            esac
+        done <"$f"
+    done
+
+    local seen="" a b i j n=${#allowed[@]}
+    if [ "$n" -gt 0 ]; then
+        for a in "${allowed[@]}"; do
+            case " $seen " in
+                *" $a "*) die "duplicate AllowedIPs '$a' across fragments — each server needs a distinct subnet/route (WireGuard maps each prefix to one peer)";;
+            esac
+            seen="$seen $a"
+        done
+        for ((i=0; i<n; i++)); do
+            for ((j=i+1; j<n; j++)); do
+                a=${allowed[i]}; b=${allowed[j]}
+                case "$a$b" in *:*) continue;; esac   # skip if either side is IPv6
+                if cidrs_overlap "$a" "$b"; then
+                    echo "Note: AllowedIPs $a and $b overlap; longest-prefix match wins. Make sure this is intended (e.g. a full tunnel plus a specific route)." >&2
+                fi
+            done
+        done
+        if [ -z "$dns" ]; then
+            case " ${allowed[*]} " in
+                *" 0.0.0.0/0 "*|*" ::/0 "*)
+                    echo "Note: full-tunnel route present but no DNS set — DNS queries can leak to the local resolver. Consider --dns." >&2;;
+            esac
+        fi
+    fi
+
+    ( umask 077
+      {
+        echo "[Interface]"
+        echo "PrivateKey = $(cat "$keyfile")"
+        echo "Address = $addr_csv"
+        [ -n "$dns" ] && echo "DNS = $dns"
+        for f in "${frags[@]}"; do
+            echo ""
+            grep -v '^#ADDR ' "$f"
+        done
+      } >"$outfile"
+    )
+    echo "Wrote $outfile"
+    echo "  Fragments and $keyfile hold secrets — delete the fragments now that they're stitched in." >&2
+    if [ "$qr" -eq 1 ]; then
+        command -v qrencode >/dev/null || die "qrencode not installed"
+        qrencode -t ansiutf8 <"$outfile"
+    fi
+}
+
+case "${1:-}" in
+    keygen)   shift; cmd_keygen "$@";;
+    add)      shift; cmd_add "$@";;
+    assemble) shift; cmd_assemble "$@";;
+    -h|--help|help|"") usage 0;;
+    *) die "unknown subcommand: $1 (try '$PROG --help')";;
+esac
