@@ -14,10 +14,10 @@ bc_state_dir() {
 bc_extract_upgrades() {
   local log="$1"
   [ -f "$log" ] || return 0
-  grep -E '^[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+->[[:space:]]+[^[:space:]]+([[:space:]]+\([^)]*\))?[[:space:]]*$' "$log" \
-    | sed -E 's/[[:space:]]+\([^)]*\)[[:space:]]*$//' \
-    | awk '{ $1=$1; print }' \
-    | awk '!seen[$0]++'
+  grep -E '^[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+->[[:space:]]+[^[:space:]]+([[:space:]]+\([^)]*\))?[[:space:]]*$' "$log" |
+    sed -E 's/[[:space:]]+\([^)]*\)[[:space:]]*$//' |
+    awk '{ $1=$1; print }' |
+    awk '!seen[$0]++'
 }
 
 # bc_summarize <pkg_list_text> <summary_outfile>
@@ -29,7 +29,8 @@ bc_summarize() {
   fi
 
   local prompt
-  prompt="$(cat <<EOF
+  prompt="$(
+    cat <<EOF
 You are summarizing Homebrew package upgrades for a developer.
 
 Here is the list of upgraded packages as "name old_version -> new_version":
@@ -55,13 +56,14 @@ short line at the end (e.g. "Minor lib bumps: libffi, llhttp, fmt"). No filler,
 no preamble, no restating version numbers I already gave you beyond a short
 heading per notable package. This is a quick post-upgrade digest.
 EOF
-)"
+  )"
 
   local model="${BREW_NOTES_MODEL:-sonnet}"
   local rc
   # stdin from /dev/null: in print mode claude otherwise waits on stdin (3s
   # warning) and would consume the user's terminal input when run from bup.
-  claude -p "$prompt" --model "$model" --allowed-tools "WebSearch WebFetch" \
+  claude -p "$prompt" --model "$model" --no-session-persistence \
+    --allowed-tools "WebSearch WebFetch" \
     </dev/null | tee "$out"
   rc="${PIPESTATUS[0]}"
   printf '\nSaved: %s\n' "$out"
