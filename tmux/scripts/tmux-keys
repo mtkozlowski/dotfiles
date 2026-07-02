@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# tmux-keys — searchable, executable tmux keybinding picker.
+#   --build-rows NOTES   build fzf rows from raw `list-keys` (stdin) + notes file (internal + tests)
+#   --parse-notes TABLE  parse `list-keys -N` (stdin) into table<TAB>key<TAB>note rows (internal + tests)
+#   --pick [--all]       run inside display-popup: fuzzy-pick a binding, stash chosen command
+#   --exec               run after popup closes: source the chosen command, then clear it
+set -euo pipefail
+
+cmdfile() { printf '%s/tmux-keys.%s.cmd' "${TMPDIR:-/tmp}" "$(id -u)"; }
+
+build_rows() {
+  # $1 = notes file (table<TAB>key<TAB>note); raw `list-keys` lines on stdin
+  awk -v notes="$1" '
+    BEGIN {
+      while ((getline line < notes) > 0) {
+        ti = index(line, "\t"); if (ti == 0) continue
+        tb = substr(line, 1, ti-1); rest = substr(line, ti+1)
+        ki = index(rest, "\t"); if (ki == 0) continue
+        note[tb SUBSEP substr(rest, 1, ki-1)] = substr(rest, ki+1)
+      }
+    }
+    {
+      tpos = 0
+      for (i = 1; i <= NF; i++) if ($i == "-T") { tpos = i; break }
+      if (tpos == 0) next
+      table = $(tpos+1); key = $(tpos+2)
+      # verbatim command = strip the first (tpos+2) whitespace-delimited tokens
+      line = $0; k = tpos + 2
+      for (j = 0; j < k; j++) sub(/^[ \t]*[^ \t]+/, "", line)
+      sub(/^[ \t]+/, "", line)
+      cmd = line
+      if (table == "root" && key ~ /^(Mouse|Wheel)/) next
+      nkey = key; gsub(/\\/, "", nkey)
+      desc = ((table SUBSEP nkey) in note) ? note[table SUBSEP nkey] : cmd
+      combo = (table == "prefix") ? ("prefix " nkey) : (table " " nkey)
+      color = (table == "prefix") ? "\033[36m" : "\033[33m"
+      visible = sprintf("%s%-16s\033[0m %-46s \033[2m%s\033[0m", color, combo, desc, cmd)
+      printf "%s\t%s\t%s\n", visible, combo, cmd
+    }
+  '
+}
+
+parse_notes() {
+  # $1 = table label; reads `tmux list-keys -N` output on stdin.
+  # Emits: table<TAB>key<TAB>note
+  # tmux prints the key column padded, then 2+ spaces, then the note. Depending
+  # on the server the key column is the bare key ("!") or the full prefixed
+  # sequence ("C-a !"); the real key is its last whitespace-delimited token.
+  awk -v t="$1" '
+    match($0, / {2,}/) {
+      kp = substr($0, 1, RSTART-1)
+      note = substr($0, RSTART+RLENGTH)
+      n = split(kp, a, /[ \t]+/)
+      if (a[n] == "") next
+      print t "\t" a[n] "\t" note
+    }
+  '
+}
+
+collect_rows() {
+  # $1 = "all" to include copy-mode tables
+  local tmpd notes raw tables t
+  tmpd="$(mktemp -d)"; trap 'rm -rf "$tmpd"' RETURN
+  notes="$tmpd/notes"; raw="$tmpd/raw"
+  : > "$notes"; : > "$raw"
+  tables="prefix root"
+  [ "${1:-}" = all ] && tables="prefix root copy-mode copy-mode-vi"
+  for t in $tables; do
+    tmux list-keys -N -T "$t" 2>/dev/null | parse_notes "$t" >> "$notes"
+    tmux list-keys -T "$t" 2>/dev/null >> "$raw"
+  done
+  build_rows "$notes" < "$raw"
+}
+
+run_pick() {
+  local all="" cf sel cmd
+  [ "${1:-}" = --all ] && all=all
+  cf="$(cmdfile)"; : > "$cf"
+  sel="$(collect_rows "$all" | fzf \
+      --ansi --delimiter=$'\t' --with-nth=1 --nth=1 \
+      --height=100% --layout=reverse --border=none \
+      --prompt='keys ▸ ' \
+      --header='enter: run   ctrl-y: copy combo   esc: cancel' \
+      --preview='printf "%s" {3} | bat --language=bash --color=always --style=plain --paging=never' \
+      --preview-window='down,3,wrap' \
+      --bind='ctrl-y:execute-silent(tmux set-buffer -w -- {2})+abort' \
+    )" || true
+  [ -n "$sel" ] || return 0
+  cmd="$(printf '%s' "$sel" | cut -f3)"
+  printf '%s\n' "$cmd" > "$cf"
+}
+
+run_exec() {
+  local cf; cf="$(cmdfile)"
+  [ -s "$cf" ] && tmux source-file "$cf"
+  rm -f "$cf"
+}
+
+case "${1:-}" in
+  --build-rows)  shift; build_rows "$1" ;;
+  --parse-notes) shift; parse_notes "$1" ;;
+  --pick)        shift; run_pick "$@" ;;
+  --exec)        run_exec ;;
+  *) echo "usage: tmux-keys --build-rows NOTES | --pick [--all] | --exec" >&2; exit 2 ;;
+esac

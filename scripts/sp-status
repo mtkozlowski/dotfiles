@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# sp-status — glance at (and browse) the Superpowers SDD ledger for the current project.
+#
+# Default: prints a distilled digest of .superpowers/sdd/progress*.md
+#          (plan, per-task ✓/○ checklist, STATUS line, operator gates).
+#          In a TTY, press <enter> to drop into an fzf browser over the whole
+#          ledger folder (glow for .md, delta for .diff); q/esc quits.
+#
+# Flags:   --digest   print the digest and exit (no interactive browse; scriptable)
+#          --browse   skip the digest and open the fzf browser straight away
+#
+# Intended to be launched from a tmux popup scoped to the pane's cwd, e.g.:
+#   bind G display-popup -d "#{pane_current_path}" -w 90% -h 90% -E "sp-status"
+
+set -uo pipefail
+
+# ---------- colours (only when writing to a terminal) ----------
+if [ -t 1 ]; then
+  BOLD=$'\e[1m'; DIM=$'\e[2m'; RESET=$'\e[0m'
+  GREEN=$'\e[32m'; YELLOW=$'\e[33m'; CYAN=$'\e[36m'; RED=$'\e[31m'; MAGENTA=$'\e[35m'; BLUE=$'\e[34m'
+else
+  BOLD=''; DIM=''; RESET=''; GREEN=''; YELLOW=''; CYAN=''; RED=''; MAGENTA=''; BLUE=''
+fi
+
+die() { printf '%s\n' "$*" >&2; }
+
+# ---------- locate .superpowers/sdd by walking up from cwd ----------
+find_sdd() {
+  local dir="${1:-$PWD}"
+  while :; do
+    [ -d "$dir/.superpowers/sdd" ] && { printf '%s\n' "$dir/.superpowers/sdd"; return 0; }
+    [ "$dir" = "/" ] && return 1
+    dir="$(dirname "$dir")"
+  done
+}
+
+SDD="$(find_sdd "$PWD")" || {
+  printf '\n  %bNo .superpowers/sdd/ ledger found%b from:\n  %s\n' "$YELLOW" "$RESET" "$PWD"
+  printf '\n  %b(this project has no active Spec-Driven Development run)%b\n' "$DIM" "$RESET"
+  [ -t 0 ] && { printf '\n  press any key '; read -rsn1 _; }
+  exit 0
+}
+REPO="$(cd "$SDD/../.." && pwd)"
+REPO_NAME="$(basename "$REPO")"
+BRANCH="$(git -C "$REPO" symbolic-ref --short HEAD 2>/dev/null || echo '?')"
+
+# ---------- pretty-print one progress ledger ----------
+render_ledger() {
+  local file="$1"
+  local title plan done_n total_n status gates
+  title="$(grep -m1 '^# ' "$file" | sed -E 's/^# +//')"
+  [ -z "$title" ] && title="$(basename "$file")"
+  plan="$(grep -m1 '^Plan:' "$file" | sed -E 's/^Plan:[[:space:]]*//; s#.*/##; s/\.md$//')"
+
+  printf '\n  %b%s%b\n' "$BOLD" "$title" "$RESET"
+  [ -n "$plan" ] && printf '  %bplan:%b %s\n' "$DIM" "$RESET" "$plan"
+  printf '\n'
+
+  total_n=0; done_n=0
+  # each "Task N: <status> ... — <desc>" line
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    total_n=$((total_n + 1))
+    local num rest first desc mark colour
+    num="${line#Task }"; num="${num%%:*}"
+    rest="${line#*: }"                       # everything after "Task N: "
+    first="${rest%% *}"                       # first word == status token
+    case "$rest" in
+      complete*)                 mark='✓'; colour="$GREEN"; done_n=$((done_n + 1)) ;;
+      pending*|todo*|blocked*)   mark='○'; colour="$YELLOW" ;;
+      in\ progress*|wip*)        mark='◐'; colour="$CYAN"; first='in progress' ;;
+      *)                         mark='•'; colour="$CYAN" ;;
+    esac
+    # description: prefer the text after the em-dash, trimmed to first sentence
+    desc="${line#*— }"
+    [ "$desc" = "$line" ] && desc="$rest"     # no em-dash → fall back to status blob
+    desc="${desc%%. *}"                       # first sentence only
+    desc="${desc%%(*}"                        # drop trailing "(commit …)" noise
+    desc="${desc%"${desc##*[![:space:]]}"}"   # rtrim
+    # cap length so it stays one line
+    [ "${#desc}" -gt 66 ] && desc="${desc:0:63}…"
+    printf '  %b%s%b  %bTask %s%b  %s\n' "$colour" "$mark" "$RESET" "$DIM" "$num" "$RESET" "$desc"
+  done < <(grep -E '^Task [0-9]+:' "$file")
+
+  if [ "$total_n" -gt 0 ]; then
+    local bar_colour="$YELLOW"; [ "$done_n" -eq "$total_n" ] && bar_colour="$GREEN"
+    printf '\n  %b%d/%d tasks complete%b\n' "$bar_colour" "$done_n" "$total_n" "$RESET"
+  fi
+
+  # STATUS: line (last occurrence wins — it's the final verdict)
+  status="$(grep -E '^STATUS:' "$file" | tail -n1 | sed -E 's/^STATUS:[[:space:]]*//')"
+  if [ -n "$status" ]; then
+    local s_colour="$GREEN"
+    case "$status" in *[Bb]lock*|*[Ff]ail*|*[Ee]rror*) s_colour="$RED" ;; esac
+    printf '  %b%bSTATUS%b %b%s%b\n' "$BOLD" "$MAGENTA" "$RESET" "$s_colour" "$status" "$RESET"
+  fi
+
+  # operator / production gates worth flagging before merge
+  gates="$(grep -ciE 'operator|OPERATIONAL|must have|before this runs live|migrat' "$file")"
+  if [ "${gates:-0}" -gt 0 ]; then
+    printf '  %b⚠ mentions operator/migration gates — check before merge%b\n' "$YELLOW" "$RESET"
+  fi
+}
+
+render_digest() {
+  printf '  %b%bSDD%b %b·%b %s %b·%b %b%s%b\n' \
+    "$BOLD" "$BLUE" "$RESET" "$DIM" "$RESET" "$REPO_NAME" "$DIM" "$RESET" "$CYAN" "$BRANCH" "$RESET"
+
+  local ledgers=("$SDD"/progress*.md)
+  if [ ! -e "${ledgers[0]}" ]; then
+    printf '\n  %bno progress ledger yet%b — %d other file(s) in sdd/\n' \
+      "$DIM" "$RESET" "$(find "$SDD" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+    return
+  fi
+  local f
+  for f in "${ledgers[@]}"; do render_ledger "$f"; done
+}
+
+# ---------- fzf browser over the whole ledger folder ----------
+browse() {
+  command -v fzf >/dev/null 2>&1 || { die "fzf not found"; return 1; }
+  local previewer
+  # fzf runs previews with cwd == $SDD (we cd there before launching) and
+  # substitutes {} with a shell-quoted filename — so use {} directly as a
+  # relative path; never prepend $SDD or add quotes (that injects literal quotes).
+  # glow for markdown, delta for diffs, bat/cat as fallback.
+  # NB: glow reads the terminal background-probe response from stdin; in a preview
+  # pane no terminal answers, so it blocks forever. Redirect stdin from /dev/null
+  # (immediate EOF → glow falls back and renders). Also pin an explicit style.
+  local gstyle="${SP_GLOW_STYLE:-dark}"
+  previewer='case {} in
+      *.diff) if command -v delta >/dev/null; then delta --paging=never < {};
+              elif command -v bat >/dev/null; then bat --style=plain --color=always --language=diff {};
+              else cat {}; fi ;;
+      *)      if command -v glow >/dev/null; then glow -s '"$gstyle"' -w "${FZF_PREVIEW_COLUMNS:-80}" {} </dev/null;
+              elif command -v bat >/dev/null; then bat --style=plain --color=always {};
+              else cat {}; fi ;;
+    esac'
+
+  # ordered list: progress ledgers, then task briefs/reports (numeric), then review diffs
+  local files
+  files="$( cd "$SDD" &&
+    { ls -1 progress*.md 2>/dev/null
+      ls -1 task-*.md    2>/dev/null | sort -t- -k2,2n -k3,3
+      ls -1 review-*.diff 2>/dev/null; } )"
+  [ -z "$files" ] && { die "empty ledger"; return 0; }
+
+  local sel
+  while :; do
+    sel="$( cd "$SDD" && printf '%s\n' "$files" | fzf \
+      --ansi --no-multi --cycle \
+      --prompt='ledger ❯ ' \
+      --header='enter: open · esc: quit' \
+      --preview="$previewer" \
+      --preview-window='right,62%,border-left,wrap' )" || break
+    [ -z "$sel" ] && break
+    case "$sel" in
+      *.diff) if command -v delta >/dev/null; then delta --paging=always < "$SDD/$sel"
+              else "${PAGER:-less -R}" "$SDD/$sel"; fi ;;
+      *)      if command -v glow >/dev/null; then glow -s "${SP_GLOW_STYLE:-dark}" -p "$SDD/$sel"
+              else "${PAGER:-less}" "$SDD/$sel"; fi ;;
+    esac
+  done
+}
+
+# ---------- entry point ----------
+case "${1:-}" in
+  --digest) render_digest; exit 0 ;;
+  --browse) browse; exit 0 ;;
+esac
+
+render_digest
+
+if [ -t 0 ] && [ -t 1 ]; then
+  printf '\n  %b[enter]%b browse files   %b[q]%b quit ' "$BOLD" "$RESET" "$BOLD" "$RESET"
+  read -rsn1 key
+  printf '\n'
+  case "$key" in
+    ''|$'\n'|$'\r') browse ;;   # enter → browser
+    *) : ;;                     # anything else → quit
+  esac
+fi
