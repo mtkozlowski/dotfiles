@@ -89,6 +89,17 @@ Last line of `.zshrc`:
 
 Loaded last so it can override anything tracked.
 
+### Secrets via 1Password (`op.zsh`)
+
+`op.zsh` (sourced from `.zshrc`) authenticates `op` the same way on every
+machine — a 1Password service-account token, with no desktop-app/biometric
+integration. The token lives in one `0600` file
+(`$XDG_CONFIG_HOME/op/service-account-token`), is injected into `op`'s own
+process per-call, and is never exported to the shell or passed as an argv — so
+it stays private from other users on a shared box. Fetch secrets with
+`op run --env-file=<refs>` (references committable, values never on disk) or the
+`openv VAR op://ref` helper. See `.zshrc.local.example` for one-time setup.
+
 ## Stow + the folded-directory gotcha
 
 `.stowrc` targets `~/.config`, and `~/.config/zsh` is a *folded* symlink

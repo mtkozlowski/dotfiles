@@ -33,10 +33,14 @@
 
 # --- Node ecosystem -----------------------------------------------------------
 
-# nvm — run the official installer first, then uncomment:
-# export NVM_DIR="$HOME/.nvm"
-# [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+# fnm — fast (Rust) Node version manager, a drop-in nvm replacement. Install first:
+#   Linux:  curl -fsSL https://fnm.vercel.app/install | bash   (-> ~/.local/share/fnm)
+#   macOS:  brew install fnm                                   (-> already on PATH)
+# Then uncomment. Place this AFTER any PATH exports above so fnm's shims win.
+# Reads .nvmrc / .node-version and auto-switches node on cd (--use-on-cd).
+# FNM_PATH="$HOME/.local/share/fnm"
+# [ -d "$FNM_PATH" ] && export PATH="$FNM_PATH:$PATH"
+# command -v fnm >/dev/null && eval "$(fnm env --use-on-cd --shell zsh)"
 
 # bun
 # export BUN_INSTALL="$HOME/.bun"
@@ -132,10 +136,39 @@
 #   export GH_DASH_CONFIG="$out"
 # }
 
-# --- Secrets ------------------------------------------------------------------
-# Fetch credentials from a secret manager at shell init — never hard-code them.
-# 1Password CLI (op) example; gate on the binary so machines without op don't error:
-# command -v op >/dev/null && export OPENAI_API_KEY="$(op read 'op://Private/OpenAI/credential')"
+# --- ssh-agent persistence (Linux / VPS) --------------------------------------
+# keychain reuses a single ssh-agent across logins so you unlock a key once.
+# macOS does NOT need this: launchd runs a persistent agent and Keychain stores
+# the passphrase — set `AddKeysToAgent yes` + `UseKeychain yes` in ~/.ssh/config
+# and `ssh-add --apple-use-keychain` once instead.
+# The guard skips keychain's ~110ms scan when a working agent is already inherited
+# (e.g. a tmux pane), so it only pays the cost bootstrapping the first agent.
+# if [[ -z "$SSH_AUTH_SOCK" || ! -S "$SSH_AUTH_SOCK" ]] && command -v keychain >/dev/null 2>&1; then
+#   eval "$(keychain --eval --quiet --agents ssh id_ed25519)"
+# fi
+
+# --- Secrets (1Password CLI) --------------------------------------------------
+# Secrets live in 1Password and are fetched at runtime by `op`. The tracked
+# zsh/op.zsh shim authenticates `op` the SAME way on every machine (macOS + VPS):
+# a SERVICE-ACCOUNT TOKEN — no desktop-app / biometric integration.
 #
-# Alternatives: pass (`export KEY="$(pass show api/openai)"`), sops+age, macOS Keychain.
-# Last resort only (avoid — leaks into env/history): export OPENAI_API_KEY="sk-..."
+#   One-time setup per machine:
+#     1. 1Password web → Developer → Service Accounts → create one, scoped to
+#        ONLY the vault(s) this machine needs. Copy the ops_… token (shown once).
+#     2. Write it to a 0600 file WITHOUT it hitting history or `ps`:
+#          ( umask 077
+#            install -d -m 700 "${XDG_CONFIG_HOME:-$HOME/.config}/op"
+#            IFS= read -rs 'tok?service-account token: '
+#            print -r -- "$tok" > "${XDG_CONFIG_HOME:-$HOME/.config}/op/service-account-token"
+#            unset tok )
+#     3. Verify: `op whoami` and `op vault ls`.
+#     Rotate/revoke the token in 1Password anytime; nothing else changes.
+#
+# Consuming secrets — never export them at shell init:
+#   • Launch a tool with secrets injected only into ITS process, from a
+#     committable references file (op:// refs, no values):
+#         # agents.refs.env  (safe to commit — references, not secrets)
+#         ANY_SERVICE_API_KEY=op://Private/AnyService/credential
+#         op run --env-file=agents.refs.env -- <dispatcher-command>
+#   • Or pull one secret on demand into the current shell (use sparingly):
+#         openv GITHUB_TOKEN op://Private/GitHub/token

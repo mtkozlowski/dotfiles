@@ -111,6 +111,9 @@ alias dpa="docker ps -a"
 alias dl="docker ps -l -q"
 alias dx="docker exec -it"
 
+# tmux
+alias ta="tmux a"
+
 # Dirs
 alias ..="cd .."
 alias ...="cd ../.."
@@ -226,6 +229,9 @@ if [[ -n "$TMUX" ]]; then
 	_tmux_pane_title() { print -Pn '\e]2;%~\a'; }
 	add-zsh-hook precmd _tmux_pane_title
 fi
+
+# 1Password op auth shim (service-account token on every machine; no-op without op).
+[[ -f "$ZDOTDIR/op.zsh" ]] && source "$ZDOTDIR/op.zsh"
 
 # Per-machine overrides (not tracked in dotfiles). See .zshrc.local.example.
 [[ -f "$ZDOTDIR/.zshrc.local" ]] && source "$ZDOTDIR/.zshrc.local"
