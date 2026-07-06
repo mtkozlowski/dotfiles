@@ -52,11 +52,11 @@ disabled = true
 
 ## CUSTOM
 
-[custom.node_version_mismatch]
-command = "test -f .nvmrc && [ $(cat .nvmrc) != $(node -v) ] && echo '🚨 NODE MISMATCH'"
-when = "test -f .nvmrc"
-format = "[$output](bold red blink) "
-description = "Warns when Node version doesn't match .nvmrc"
+# [custom.node_version_mismatch]
+# command = "test -f .nvmrc && [ $(cat .nvmrc) != $(node -v) ] && echo '🚨 NODE MISMATCH'"
+# when = "test -f .nvmrc"
+# format = "[$output](bold red blink) "
+# description = "Warns when Node version doesn't match .nvmrc"
 
 ## COLOR PALLETTE
 
