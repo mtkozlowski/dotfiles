@@ -20,6 +20,19 @@ bc_extract_upgrades() {
     awk '!seen[$0]++'
 }
 
+# bc_banner <text>: print a bold, ruled banner to the terminal so the digest is
+# easy to spot below brew's own output. Bold is applied only on a real TTY, so
+# redirected output and the saved summary file stay free of escape codes.
+bc_banner() {
+  local text="$1" bold='' reset=''
+  if [ -t 1 ] && command -v tput >/dev/null 2>&1 && tput bold >/dev/null 2>&1; then
+    bold="$(tput bold)"
+    reset="$(tput sgr0)"
+  fi
+  local rule='────────────────────────────────────────────────────'
+  printf '\n%s%s\n%s\n%s%s\n\n' "$bold" "$rule" "$text" "$rule" "$reset"
+}
+
 # bc_summarize <pkg_list_text> <summary_outfile>
 bc_summarize() {
   local pkgs="$1" out="$2"
@@ -55,11 +68,15 @@ Collapse trivial library patch-bumps with no user-visible change into a single
 short line at the end (e.g. "Minor lib bumps: libffi, llhttp, fmt"). No filler,
 no preamble, no restating version numbers I already gave you beyond a short
 heading per notable package. This is a quick post-upgrade digest.
+
+Do NOT print an overall title such as "Homebrew Upgrade Digest" — the tool
+already prints a banner. Start directly with the first package's heading.
 EOF
   )"
 
   local model="${BREW_NOTES_MODEL:-sonnet}"
   local rc
+  bc_banner "Homebrew Upgrade Digest"
   # stdin from /dev/null: in print mode claude otherwise waits on stdin (3s
   # warning) and would consume the user's terminal input when run from bup.
   claude -p "$prompt" --model "$model" --no-session-persistence \
