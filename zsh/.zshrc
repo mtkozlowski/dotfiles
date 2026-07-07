@@ -114,6 +114,9 @@ alias dx="docker exec -it"
 # tmux
 alias ta="tmux a"
 
+# worktrunk
+alias wtsc="wt switch -c"
+
 # Dirs
 alias ..="cd .."
 alias ...="cd ../.."
