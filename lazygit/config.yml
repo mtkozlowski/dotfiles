@@ -1,0 +1,10 @@
+# lazygit copies via its Go clipboard lib, which shells out to
+# xsel/xclip/wl-copy/pbcopy — none of which exist on the headless VPS (no GUI).
+# Route copies through tmux instead: `set-buffer -w` writes the OSC 52 clipboard
+# escape to the real client's terminal (set-clipboard is on), the same mechanism
+# tmux-yank/thumbs/fzf-url use. lazygit runs in a plain `display-popup` (not a
+# nested tmux client), so the default target-client is the real Ghostty client
+# and the escape reaches the macOS clipboard over SSH. lazygit shell-quotes
+# {{text}}, so no extra quoting is needed here.
+os:
+  copyToClipboardCmd: tmux set-buffer -w -- {{text}}
