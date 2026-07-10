@@ -1,6 +1,10 @@
 .DS_Store
 fzf
 history.txt
+
+# Python bytecode cache (e.g. from importing scripts/mdserve for testing).
+__pycache__/
+*.pyc
 tmux/plugins/
 zsh/.zcompdump*
 zsh/.zsh_history

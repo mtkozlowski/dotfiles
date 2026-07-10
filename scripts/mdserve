@@ -1,0 +1,593 @@
+#!/usr/bin/env python3
+"""
+mdserve — a tiny, self-hosted file browser that renders Markdown nicely and
+works well on a phone.
+
+Standard library only. No pip install. Drop it on your VPS and run:
+
+    mdserve                      # serve current dir on 0.0.0.0:8080
+    mdserve --root /srv/agent    # serve a specific directory
+    mdserve --port 9000
+    mdserve --user me            # require Basic auth (prompts for password)
+
+Then open http://YOUR_VPS_IP:8080/ on your phone.
+
+Markdown/code rendering (marked + highlight.js + DOMPurify) is loaded from a
+CDN, so the *viewing device* needs internet — which your phone has when it
+reaches the VPS. If a lib fails to load, the raw text is shown instead.
+
+SECURITY NOTES
+- Binds 0.0.0.0 by default: anyone who can reach the port reads every file
+  under --root. Use --user/--password, or restrict exposure with a firewall.
+- Basic auth is sent in cleartext over plain HTTP. Only expose this over a
+  trusted network — e.g. a WireGuard/SSH tunnel or Tailscale, not the open
+  internet. Prefer MDSERVE_PASSWORD (env) over --password so the secret does
+  not leak into `ps`/shell history.
+"""
+
+import argparse
+import datetime as _dt
+import getpass
+import hmac
+import html
+import json
+import mimetypes
+import os
+import posixpath
+import socket
+import urllib.parse
+from base64 import b64decode
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# ----------------------------------------------------------------------------
+# Config (populated in main())
+# ----------------------------------------------------------------------------
+ROOT = os.getcwd()
+SHOW_HIDDEN = False
+AUTH = None  # (user, password) tuple, or None
+INLINE_MAX = 3 * 1024 * 1024  # render text/markdown inline up to this size
+
+MD_EXTS = {".md", ".markdown", ".mdown", ".mkd", ".mkdn", ".mdwn"}
+IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".avif"}
+TEXT_EXTS = {
+    ".txt", ".text", ".log", ".csv", ".tsv", ".json", ".yaml", ".yml", ".toml",
+    ".ini", ".cfg", ".conf", ".env", ".sh", ".bash", ".zsh", ".fish", ".ps1",
+    ".py", ".pyi", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".css", ".scss",
+    ".less", ".html", ".htm", ".xml", ".sql", ".rb", ".go", ".rs", ".c", ".h",
+    ".cpp", ".hpp", ".cc", ".java", ".kt", ".swift", ".php", ".pl", ".lua",
+    ".r", ".jl", ".dart", ".scala", ".clj", ".ex", ".exs", ".erl", ".hs",
+    ".dockerfile", ".makefile", ".gitignore", ".editorconfig", ".diff", ".patch",
+}
+
+CDN = "https://cdnjs.cloudflare.com/ajax/libs"
+
+# ----------------------------------------------------------------------------
+# Styling — a calm "reader" theme, light + dark via prefers-color-scheme.
+# Accent is a muted cyan/teal, a nod to terminal output without the cliches.
+# ----------------------------------------------------------------------------
+BASE_CSS = """
+:root{
+  --bg:#fbfbfa; --surface:#ffffff; --surface-2:#f4f4f2;
+  --text:#1b1c1e; --muted:#6a6f78; --border:#e7e6e2;
+  --accent:#0e7c8b; --accent-weak:#e2f0f2;
+  --shadow:0 1px 2px rgba(20,22,26,.06),0 4px 16px rgba(20,22,26,.04);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#15171c; --surface:#1c1f26; --surface-2:#22262f;
+    --text:#e7e8ea; --muted:#9aa0aa; --border:#2b2f39;
+    --accent:#5cc2d3; --accent-weak:#1a323a;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.25);
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--sans); font-size:16px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+
+/* Sticky header with breadcrumb */
+header{
+  position:sticky; top:0; z-index:10;
+  background:color-mix(in srgb,var(--bg) 88%, transparent);
+  backdrop-filter:saturate(1.4) blur(10px);
+  border-bottom:1px solid var(--border);
+}
+.bar{max-width:820px; margin:0 auto; padding:12px 16px; display:flex; gap:12px; align-items:center}
+.crumbs{font-size:14px; color:var(--muted); overflow-x:auto; white-space:nowrap; flex:1; scrollbar-width:none}
+.crumbs::-webkit-scrollbar{display:none}
+.crumbs a{color:var(--muted)}
+.crumbs .sep{opacity:.5; margin:0 6px}
+.crumbs .cur{color:var(--text); font-weight:600}
+.tag{font:600 11px/1 var(--mono); color:var(--accent); border:1px solid var(--border);
+  padding:5px 8px; border-radius:999px; letter-spacing:.04em}
+
+main{max-width:820px; margin:0 auto; padding:20px 16px 64px}
+
+/* Directory listing */
+.filter{width:100%; padding:11px 14px; margin-bottom:14px; font-size:16px;
+  color:var(--text); background:var(--surface); border:1px solid var(--border);
+  border-radius:10px}
+.filter::placeholder{color:var(--muted)}
+ul.list{list-style:none; margin:0; padding:0; background:var(--surface);
+  border:1px solid var(--border); border-radius:12px; overflow:hidden; box-shadow:var(--shadow)}
+ul.list li{border-top:1px solid var(--border)}
+ul.list li:first-child{border-top:none}
+.row{display:flex; align-items:center; gap:12px; padding:14px 16px; min-height:52px; color:var(--text)}
+.row:hover{background:var(--surface-2); text-decoration:none}
+.ico{flex:none; width:22px; text-align:center; font-size:17px; opacity:.85}
+.nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.meta{flex:none; font:400 12px/1 var(--mono); color:var(--muted)}
+.row.dir .nm{font-weight:600}
+.row.md .ico{color:var(--accent)}
+.empty{color:var(--muted); padding:28px 4px; text-align:center}
+
+/* Generic viewer chrome */
+.viewer-actions{display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap}
+.btn{display:inline-block; padding:9px 14px; font-size:14px; font-weight:600;
+  background:var(--surface); color:var(--text); border:1px solid var(--border);
+  border-radius:9px; box-shadow:var(--shadow)}
+.btn:hover{text-decoration:none; border-color:var(--accent)}
+.fileimg{max-width:100%; height:auto; border-radius:10px; border:1px solid var(--border);
+  background:repeating-conic-gradient(var(--surface-2) 0 25%, transparent 0 50%) 0/20px 20px}
+
+/* Raw code preview */
+pre.raw{background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:16px; overflow-x:auto; box-shadow:var(--shadow)}
+pre.raw code{font-family:var(--mono); font-size:13.5px; line-height:1.6}
+
+/* ---- Rendered Markdown ---- */
+.markdown-body{font-size:16.5px; line-height:1.7; word-wrap:break-word}
+.markdown-body h1,.markdown-body h2,.markdown-body h3,
+.markdown-body h4,.markdown-body h5,.markdown-body h6{
+  line-height:1.25; margin:1.9em 0 .6em; font-weight:700; letter-spacing:-.01em}
+.markdown-body h1{font-size:1.85em; margin-top:0}
+.markdown-body h2{font-size:1.45em; padding-bottom:.3em; border-bottom:1px solid var(--border)}
+.markdown-body h3{font-size:1.2em}
+.markdown-body h4{font-size:1.02em}
+.markdown-body p,.markdown-body ul,.markdown-body ol,.markdown-body blockquote,
+.markdown-body table,.markdown-body pre{margin:0 0 1.05em}
+.markdown-body ul,.markdown-body ol{padding-left:1.5em}
+.markdown-body li{margin:.3em 0}
+.markdown-body li>ul,.markdown-body li>ol{margin:.3em 0}
+.markdown-body blockquote{margin-left:0; padding:.2em 1em; color:var(--muted);
+  border-left:3px solid var(--accent)}
+.markdown-body a{text-decoration:underline; text-underline-offset:2px}
+.markdown-body hr{border:none; border-top:1px solid var(--border); margin:2em 0}
+.markdown-body img{max-width:100%; height:auto; border-radius:8px}
+.markdown-body code{font-family:var(--mono); font-size:.88em;
+  background:var(--surface-2); padding:.15em .4em; border-radius:5px}
+.markdown-body pre{background:var(--surface); border:1px solid var(--border);
+  border-radius:12px; padding:16px; overflow-x:auto; box-shadow:var(--shadow)}
+.markdown-body pre code{background:none; padding:0; font-size:13.5px; line-height:1.6}
+.markdown-body table{border-collapse:collapse; display:block; overflow-x:auto; width:100%}
+.markdown-body th,.markdown-body td{border:1px solid var(--border); padding:8px 12px; text-align:left}
+.markdown-body th{background:var(--surface-2)}
+.markdown-body tr:nth-child(even) td{background:var(--surface-2)}
+.markdown-body input[type=checkbox]{margin-right:.5em}
+.markdown-body :where(h1,h2,h3,h4) code{font-size:.9em}
+
+footer{max-width:820px; margin:0 auto; padding:0 16px 40px; color:var(--muted); font-size:12px}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+"""
+
+
+# ----------------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------------
+def safe_join(rel_url_path):
+    """Resolve a URL path under ROOT, blocking traversal/symlink escapes.
+
+    Returns an absolute filesystem path, or None if it escapes ROOT.
+    """
+    rel = urllib.parse.unquote(rel_url_path)
+    rel = rel.replace("\\", "/").lstrip("/")
+    # Normalise using posix rules then map to the OS
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        # Let realpath below be the real gate, but reject obvious traversal early
+        pass
+    candidate = os.path.join(ROOT, *parts)
+    full = os.path.realpath(candidate)
+    root_real = os.path.realpath(ROOT)
+    if full == root_real or full.startswith(root_real + os.sep):
+        return full
+    return None
+
+
+def human_size(n):
+    for unit in ("B", "K", "M", "G", "T"):
+        if n < 1024 or unit == "T":
+            if unit == "B":
+                return f"{n}\u00a0B"
+            return f"{n:.0f}\u00a0{unit}" if n >= 100 else f"{n:.1f}\u00a0{unit}"
+        n /= 1024
+
+
+def fmt_time(ts):
+    return _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
+def js_str(s):
+    """A JS string literal safe to inline inside <script>…</script>.
+
+    json.dumps handles quoting/escaping; the extra replaces stop a value like
+    a filename containing "</script>" from closing the tag early (XSS).
+    """
+    out = json.dumps(s).replace("</", "<\\/")
+    # U+2028/U+2029 are valid JSON but terminate a JS string literal.
+    return out.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
+def kind_of(name, is_dir):
+    if is_dir:
+        return "dir"
+    ext = os.path.splitext(name)[1].lower()
+    if ext in MD_EXTS:
+        return "md"
+    if ext in IMG_EXTS:
+        return "img"
+    if ext in TEXT_EXTS or name.lower() in ("dockerfile", "makefile", "readme"):
+        return "text"
+    return "bin"
+
+
+ICONS = {"dir": "\U0001F4C1", "md": "\U0001F4C4", "img": "\U0001F5BC",
+         "text": "\U0001F4C3", "bin": "\U0001F4E6", "up": "\u2934"}
+
+
+def breadcrumb_html(rel_parts):
+    out = ['<a href="/b/">home</a>']
+    acc = ""
+    for i, part in enumerate(rel_parts):
+        acc += "/" + urllib.parse.quote(part)
+        last = i == len(rel_parts) - 1
+        label = html.escape(part)
+        if last:
+            out.append(f'<span class="sep">/</span><span class="cur">{label}</span>')
+        else:
+            out.append(f'<span class="sep">/</span><a href="/b{acc}/">{label}</a>')
+    return "".join(out)
+
+
+def page(title, crumbs, body, tag="", head="", script=""):
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>{html.escape(title)}</title>
+<style>{BASE_CSS}</style>
+{head}
+</head>
+<body>
+<header><div class="bar">
+  <div class="crumbs">{crumbs}</div>
+  {f'<span class="tag">{tag}</span>' if tag else ''}
+</div></header>
+<main>{body}</main>
+<footer>mdserve \u00b7 serving <code>{html.escape(os.path.basename(ROOT.rstrip(os.sep)) or ROOT)}</code></footer>
+{script}
+</body>
+</html>"""
+
+
+# Shared client script: renders markdown or highlights code, with graceful
+# fallback to raw text if a CDN library is unavailable.
+# Subresource Integrity hashes pin the exact CDN payloads — a compromised or
+# swapped file fails to load rather than running attacker JS in your browser.
+_SRI_HLJS_LIGHT = "sha384-eFTL69TLRZTkNfYZOLM+G04821K1qZao/4QLJbet1pP4tcF+fdXq/9CdqAbWRl/L"
+_SRI_HLJS_DARK = "sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH"
+_SRI_MARKED = "sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi"
+_SRI_DOMPURIFY = "sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a"
+_SRI_HLJS = "sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
+
+RENDER_SCRIPT = f"""
+<link rel="stylesheet" href="{CDN}/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)" integrity="{_SRI_HLJS_LIGHT}" crossorigin="anonymous" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="{CDN}/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)" integrity="{_SRI_HLJS_DARK}" crossorigin="anonymous" referrerpolicy="no-referrer">
+<script src="{CDN}/marked/12.0.2/marked.min.js" integrity="{_SRI_MARKED}" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="{CDN}/dompurify/3.1.6/purify.min.js" integrity="{_SRI_DOMPURIFY}" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="{CDN}/highlight.js/11.9.0/highlight.min.js" integrity="{_SRI_HLJS}" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "mdserve/1.0"
+
+    # -- auth ----------------------------------------------------------------
+    def _authed(self):
+        if AUTH is None:
+            return True
+        hdr = self.headers.get("Authorization", "")
+        if hdr.startswith("Basic "):
+            try:
+                user, _, pw = b64decode(hdr[6:]).decode("utf-8").partition(":")
+                # Constant-time compare to avoid leaking the secret via timing.
+                ok_user = hmac.compare_digest(user, AUTH[0])
+                ok_pw = hmac.compare_digest(pw, AUTH[1])
+                if ok_user and ok_pw:
+                    return True
+            except Exception:
+                pass
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="mdserve"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"Authentication required.\n")
+        return False
+
+    # -- small response helpers ---------------------------------------------
+    def _html(self, text, code=200):
+        data = text.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _error(self, code, msg):
+        crumbs = '<a href="/b/">home</a>'
+        body = f'<div class="empty">{html.escape(msg)}</div>'
+        self._html(page(f"{code}", crumbs, body, tag=str(code)), code=code)
+
+    # -- routing -------------------------------------------------------------
+    def do_GET(self):
+        if not self._authed():
+            return
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        try:
+            if path == "/" or path == "":
+                self.send_response(302)
+                self.send_header("Location", "/b/")
+                self.end_headers()
+            elif path.startswith("/b/") or path == "/b":
+                self.route_browse(path[2:] or "/")
+            elif path.startswith("/raw/"):
+                self.route_raw(path[len("/raw"):])
+            else:
+                self._error(404, "Not found.")
+        except BrokenPipeError:
+            pass
+        except Exception as e:  # noqa: BLE001 — keep the server alive
+            self._error(500, f"Server error: {e}")
+
+    # -- /b/  directory listing OR file viewer ------------------------------
+    def route_browse(self, url_rel):
+        fs = safe_join(url_rel)
+        if fs is None or not os.path.exists(fs):
+            return self._error(404, "That path doesn't exist here.")
+
+        rel_clean = urllib.parse.unquote(url_rel).strip("/")
+        rel_parts = [p for p in rel_clean.split("/") if p] if rel_clean else []
+        crumbs = breadcrumb_html(rel_parts)
+
+        if os.path.isdir(fs):
+            return self._render_dir(fs, rel_parts, crumbs)
+        return self._render_file(fs, rel_parts, crumbs)
+
+    def _render_dir(self, fs, rel_parts, crumbs):
+        try:
+            entries = os.listdir(fs)
+        except PermissionError:
+            return self._error(403, "Permission denied.")
+        if not SHOW_HIDDEN:
+            entries = [e for e in entries if not e.startswith(".")]
+
+        dirs, files = [], []
+        for name in entries:
+            full = os.path.join(fs, name)
+            try:
+                is_dir = os.path.isdir(full)
+                st = os.stat(full)
+            except OSError:
+                continue
+            (dirs if is_dir else files).append((name, is_dir, st))
+        dirs.sort(key=lambda x: x[0].lower())
+        files.sort(key=lambda x: x[0].lower())
+
+        base_url = "/b/" + "".join(urllib.parse.quote(p) + "/" for p in rel_parts)
+        rows = []
+
+        if rel_parts:
+            parent = "/b/" + "".join(urllib.parse.quote(p) + "/" for p in rel_parts[:-1])
+            rows.append(
+                f'<li><a class="row dir" href="{parent}">'
+                f'<span class="ico">{ICONS["up"]}</span>'
+                f'<span class="nm">..</span></li>'
+            )
+
+        for name, is_dir, st in dirs + files:
+            kind = kind_of(name, is_dir)
+            href = base_url + urllib.parse.quote(name) + ("/" if is_dir else "")
+            meta = "" if is_dir else f'<span class="meta">{human_size(st.st_size)}</span>'
+            rows.append(
+                f'<li><a class="row {kind}" href="{href}" data-name="{html.escape(name.lower())}">'
+                f'<span class="ico">{ICONS[kind]}</span>'
+                f'<span class="nm">{html.escape(name)}</span>{meta}</a></li>'
+            )
+
+        if not rows:
+            listing = '<div class="empty">This folder is empty.</div>'
+        else:
+            listing = f'<ul class="list" id="list">{"".join(rows)}</ul>'
+
+        body = (
+            '<input class="filter" id="filter" type="search" '
+            'placeholder="Filter this folder\u2026" autocomplete="off" '
+            'autocapitalize="off" spellcheck="false">' + listing
+        )
+        script = """<script>
+const f=document.getElementById('filter'),L=document.getElementById('list');
+if(f&&L){f.addEventListener('input',()=>{const q=f.value.toLowerCase();
+for(const li of L.children){const a=li.querySelector('[data-name]');
+li.style.display=(!a||a.dataset.name.includes(q))?'':'none';}});}
+</script>"""
+        title = "/" + "/".join(rel_parts) if rel_parts else "home"
+        self._html(page(title, crumbs, body, tag="dir", script=script))
+
+    def _render_file(self, fs, rel_parts, crumbs):
+        name = rel_parts[-1] if rel_parts else os.path.basename(fs)
+        kind = kind_of(name, False)
+        raw_url = "/raw/" + "".join(urllib.parse.quote(p) + "/" for p in rel_parts[:-1]) \
+                  + urllib.parse.quote(name)
+        try:
+            size = os.path.getsize(fs)
+        except OSError:
+            size = 0
+
+        actions = f'<a class="btn" href="{raw_url}" download>Download</a>'
+        title = "/" + "/".join(rel_parts)
+
+        if kind == "img":
+            body = (f'<div class="viewer-actions">{actions}</div>'
+                    f'<img class="fileimg" src="{raw_url}" alt="{html.escape(name)}">')
+            return self._html(page(title, crumbs, body, tag="img"))
+
+        if kind == "md" and size <= INLINE_MAX:
+            body = (
+                f'<div class="viewer-actions">'
+                f'<a class="btn" href="{raw_url}">View raw</a>'
+                f'<a class="btn" href="{raw_url}" download>Download</a></div>'
+                f'<article class="markdown-body" id="content">'
+                f'<div class="empty">Rendering\u2026</div></article>'
+            )
+            script = RENDER_SCRIPT + f"""<script>
+(async()=>{{
+  const el=document.getElementById('content');
+  try{{
+    const r=await fetch({js_str(raw_url)});
+    const txt=await r.text();
+    if(typeof marked==='undefined'){{
+      el.className=''; const p=document.createElement('pre');
+      p.className='raw'; p.textContent=txt; el.replaceChildren(p); return;
+    }}
+    marked.setOptions({{gfm:true,breaks:false}});
+    let h=marked.parse(txt);
+    if(typeof DOMPurify!=='undefined') h=DOMPurify.sanitize(h);
+    el.innerHTML=h;
+    if(typeof hljs!=='undefined')
+      el.querySelectorAll('pre code').forEach(b=>hljs.highlightElement(b));
+    document.title={js_str(title)};
+  }}catch(e){{ el.className=''; el.innerHTML=
+    '<div class="empty">Could not load this file.</div>'; }}
+}})();
+</script>"""
+            return self._html(page(title, crumbs, body, tag="md", script=script))
+
+        if kind in ("text", "md") and size <= INLINE_MAX:
+            ext = os.path.splitext(name)[1].lower().lstrip(".")
+            body = (
+                f'<div class="viewer-actions">{actions}</div>'
+                f'<pre class="raw"><code class="language-{html.escape(ext)}" '
+                f'id="code"></code></pre>'
+            )
+            script = RENDER_SCRIPT + f"""<script>
+(async()=>{{
+  const el=document.getElementById('code');
+  try{{
+    const r=await fetch({js_str(raw_url)}); el.textContent=await r.text();
+    if(typeof hljs!=='undefined') hljs.highlightElement(el);
+  }}catch(e){{ el.textContent='Could not load this file.'; }}
+}})();
+</script>"""
+            return self._html(page(title, crumbs, body, tag=ext or "text", script=script))
+
+        # binary or too large
+        info = "Too large to preview inline." if size > INLINE_MAX else "Binary file."
+        body = (f'<div class="empty">{info}<br><br>{actions}</div>')
+        self._html(page(title, crumbs, body, tag="file"))
+
+    # -- /raw/  serve bytes with correct content-type -----------------------
+    def route_raw(self, url_rel):
+        fs = safe_join(url_rel)
+        if fs is None or not os.path.isfile(fs):
+            return self._error(404, "Not found.")
+        name = os.path.basename(fs)
+        ext = os.path.splitext(name)[1].lower()
+        if ext in MD_EXTS or name.lower() in ("dockerfile", "makefile"):
+            ctype = "text/plain; charset=utf-8"
+        else:
+            ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+            if ctype.startswith("text/") and "charset" not in ctype:
+                ctype += "; charset=utf-8"
+        try:
+            size = os.path.getsize(fs)
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(size))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            with open(fs, "rb") as fh:
+                while chunk := fh.read(64 * 1024):
+                    self.wfile.write(chunk)
+        except BrokenPipeError:
+            pass
+
+    def log_message(self, fmt, *args):
+        # Quieter, single-line logging
+        print(f"{self.address_string()} - {fmt % args}")
+
+
+def get_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return "127.0.0.1"
+
+
+def main():
+    global ROOT, SHOW_HIDDEN, AUTH
+    ap = argparse.ArgumentParser(description="Tiny mobile-friendly Markdown file browser.")
+    ap.add_argument("--root", default=os.getcwd(), help="Directory to serve (default: cwd)")
+    ap.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    ap.add_argument("--port", type=int, default=8080, help="Port (default: 8080)")
+    ap.add_argument("--user", help="Username for HTTP Basic auth")
+    ap.add_argument("--password", help="Password for HTTP Basic auth "
+                    "(prefer MDSERVE_PASSWORD env or the interactive prompt "
+                    "so the secret stays out of ps/shell history)")
+    ap.add_argument("--hidden", action="store_true", help="Show dotfiles")
+    args = ap.parse_args()
+
+    ROOT = os.path.realpath(os.path.expanduser(args.root))
+    if not os.path.isdir(ROOT):
+        raise SystemExit(f"Not a directory: {ROOT}")
+    SHOW_HIDDEN = args.hidden
+    # Auth can also come from env vars (handy for systemd units)
+    user = args.user or os.environ.get("MDSERVE_USER")
+    pw = args.password or os.environ.get("MDSERVE_PASSWORD")
+    # If a user is set but no password was supplied, prompt for it rather than
+    # forcing it onto the command line (where it would leak into ps/history).
+    if user and not pw:
+        pw = getpass.getpass(f"Password for '{user}': ")
+    if user and pw:
+        AUTH = (user, pw)
+
+    httpd = ThreadingHTTPServer((args.host, args.port), Handler)
+    lan = get_lan_ip()
+    print(f"mdserve serving {ROOT}")
+    print(f"  local:   http://127.0.0.1:{args.port}/")
+    if args.host in ("0.0.0.0", "::"):
+        print(f"  network: http://{lan}:{args.port}/  (use your VPS public IP from a phone)")
+    print(f"  auth:    {'on (Basic)' if AUTH else 'OFF — anyone who can reach this port can read files'}")
+    print("Ctrl-C to stop.")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nbye")
+
+
+if __name__ == "__main__":
+    main()
