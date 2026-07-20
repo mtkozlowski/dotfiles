@@ -8,11 +8,20 @@
 #   4. else: dir gh-dash was launched from; if none, the command errors.
 
 # --- Sections -------------------------------------------------------------
-# Scoped to @me on purpose: a bare `is:open` searches all of GitHub (the
-# recipe's author hit 83M results). Most actionable first.
+# Most actionable first. smartFilteringAtLaunch (below) auto-prepends
+# `repo:<current>` to every section with no explicit repo filter when gh-dash
+# is launched inside a repo (remote order: upstream, github, origin), so these
+# read as "…in THIS repo" — the team-PR browse view for whatever repo you're
+# in. Caveat: the bare `is:open` section searches all of GitHub (the recipe's
+# author hit 83M results) if launched OUTSIDE any repo with smart filtering off
+# (toggle: `t`). Launch in-repo and it stays scoped.
 prSections:
   - title: Needs My Review
     filters: is:open review-requested:@me
+  - title: Repo Open
+    filters: is:open
+  - title: Needs Review
+    filters: is:open review:required -author:@me
   - title: Mine
     filters: is:open author:@me
   - title: Involved
