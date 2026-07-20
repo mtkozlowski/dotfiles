@@ -27,6 +27,16 @@ border_style  = { fg = "#928374" }
 # : }}}
 
 
+# : Indicator {{{
+
+[indicator]
+# Preview hover: bg block, not yazi's default underline (reads as false indicator).
+# Remove entirely with: preview = { underline = false }
+preview = { fg = "#282828", bg = "#a89984" }
+
+# : }}}
+
+
 # : Tabs {{{
 
 [tabs]

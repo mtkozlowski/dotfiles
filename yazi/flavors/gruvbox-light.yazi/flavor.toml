@@ -37,6 +37,15 @@ border_style  = { fg = "#bdae93" }
 # : }}}
 
 
+# : Indicator {{{
+
+[indicator]
+# Preview hover: bg block, not yazi's default underline (reads as false indicator).
+preview = { fg = "#fbf1c7", bg = "#7c6f64" }
+
+# : }}}
+
+
 # : Tabs {{{
 
 [tabs]
