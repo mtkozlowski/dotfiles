@@ -54,6 +54,15 @@ run = 'layout floating'
 [[on-window-detected]]
 if.app-id = 'com.apple.Music'
 run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'com.1password.1password'
+run = 'layout floating'
+
+[[on-window-detected]]
+if.app-id = 'us.zoom.xos'
+run = 'layout floating'
+
 # Auto-place apps on their home workspace so they ride monitor changes
 #
 # Ghostty's bundle ID com.mitchellh.ghostty is the official one
