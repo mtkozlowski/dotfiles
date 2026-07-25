@@ -8,3 +8,4 @@
 --ignore=.*\.local
 --ignore=.superpowers
 --ignore=.a5c
+--ignore=home
