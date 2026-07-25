@@ -36,6 +36,8 @@ brew "eza"
 brew "fd"
 # Lock file during command
 brew "flock"
+# Fast and simple Node.js version manager
+brew "fnm"
 # Command-line fuzzy finder written in Go
 brew "fzf"
 # GitHub command-line tool
@@ -48,10 +50,10 @@ brew "git-delta"
 brew "glow"
 # GNU Transport Layer Security (TLS) Library
 brew "gnutls"
-# Validating, recursive, caching DNS resolver
-brew "unbound"
 # Directory/file & DNS busting tool written in Go
 brew "gobuster"
+# Validating, recursive, caching DNS resolver
+brew "unbound"
 # Graph visualization software from AT&T and Bell Labs
 brew "graphviz"
 # HTTP load generator, ApacheBench (ab) replacement
@@ -86,6 +88,8 @@ brew "ocrmypdf"
 brew "poppler"
 # Cross-platform library for audio I/O
 brew "portaudio"
+# QR Code generation
+brew "qrencode"
 # Search tool like grep and The Silver Searcher
 brew "ripgrep"
 # Smart session manager for the terminal
@@ -131,6 +135,8 @@ brew "keith/formulae/reminders-cli"
 brew "modem-dev/tap/hunk", trusted: true
 # Move, fix, list, verify, prune, and manage Claude Code projects
 brew "wsagency/tap/clamp"
+# Command-line interface for 1Password
+cask "1password-cli"
 # AeroSpace is an i3-like tiling window manager for macOS
 cask "nikitabobko/tap/aerospace"
 # Compact TeX distribution as alternative to the full TeX Live / MacTeX
