@@ -101,34 +101,34 @@ IP addresses but mean different things.
 
 ### 4a. A host address vs. a network (range)
 
-An IPv4 address is 4 numbers (octets), 0–255 each: `10.20.0.1`. Conceptually it splits into a
+An IPv4 address is 4 numbers (octets), 0–255 each: `10.1.0.1`. Conceptually it splits into a
 **network part** (which subnet) and a **host part** (which machine in it). The `/N` suffix says
 how many bits (from the left) are the network part.
 
-- `10.20.0.1` — a **specific machine** (a host). Often `.1` is the server/gateway of its subnet,
+- `10.1.0.1` — a **specific machine** (a host). Often `.1` is the server/gateway of its subnet,
   by convention (nothing enforces it; it's just a habit).
-- `10.20.0.0/24` — a **whole subnet**, "all of `10.20.0.*`". The **zeros are the host part
-  blanked out** — you're naming the *network*, not a machine. `10.20.0.0` with `/24` means
-  "the first 24 bits (`10.20.0`) are the network; the last 8 bits (the final octet) are free
+- `10.1.0.0/24` — a **whole subnet**, "all of `10.1.0.*`". The **zeros are the host part
+  blanked out** — you're naming the *network*, not a machine. `10.1.0.0` with `/24` means
+  "the first 24 bits (`10.1.0`) are the network; the last 8 bits (the final octet) are free
   for hosts `.0`–`.255`".
 - `0.0.0.0/0` — **every possible address** ("the whole internet / default route"). All bits are
   host bits, none are network bits, so every address matches.
 
 So an address "with zeros at the end" is almost always a **network/range**, and the zeros are
-just the host bits set to nothing. `10.20.0.0/24` is the *name of the street*; `10.20.0.7` is
+just the host bits set to nothing. `10.1.0.0/24` is the *name of the street*; `10.1.0.7` is
 *a house on it*.
 
-### 4b. Why some are bare (`10.20.0.1`) and some have a `/N`
+### 4b. Why some are bare (`10.1.0.1`) and some have a `/N`
 
 The `/N` is **CIDR notation** — it turns a single address into a range by declaring the network
 size. `N` is the number of leading bits that are fixed.
 
 | Notation | Means | How many addresses |
 |---|---|---|
-| `10.20.0.1` (bare) | a single host — implicitly `/32` in most WireGuard contexts | 1 |
-| `10.20.0.1/32` | exactly this one host | 1 |
-| `10.20.0.0/24` | the `10.20.0.*` subnet | 256 |
-| `10.20.0.0/16` | the `10.20.*.*` range | 65,536 |
+| `10.1.0.1` (bare) | a single host — implicitly `/32` in most WireGuard contexts | 1 |
+| `10.1.0.1/32` | exactly this one host | 1 |
+| `10.1.0.0/24` | the `10.1.0.*` subnet | 256 |
+| `10.1.0.0/16` | the `10.1.*.*` range | 65,536 |
 | `10.0.0.0/8` | all of `10.*.*.*` | ~16.7M |
 | `0.0.0.0/0` | everything (default route) | all IPv4 |
 
@@ -142,13 +142,13 @@ is the entire internet.
 ### 4c. Where each form shows up in WireGuard
 
 - **`[Interface] Address`** — usually a host with the subnet mask of the tunnel network, e.g.
-  `Address = 10.20.0.2/24`. The `/24` tells your OS "I'm one machine on the `10.20.0.0/24`
+  `Address = 10.1.0.2/24`. The `/24` tells your OS "I'm one machine on the `10.1.0.0/24`
   network," which affects local routing and source-address choice.
 - **`[Peer] AllowedIPs`** — a **list of ranges** that live behind that peer:
-  - `AllowedIPs = 10.20.0.5/32` — just that one machine routes to this peer (typical for a
+  - `AllowedIPs = 10.1.0.5/32` — just that one machine routes to this peer (typical for a
     single client on a server).
-  - `AllowedIPs = 10.20.0.0/24` — the peer's whole subnet routes to it (typical client→server:
-    "send anything for `10.20.0.*` down this tunnel").
+  - `AllowedIPs = 10.1.0.0/24` — the peer's whole subnet routes to it (typical client→server:
+    "send anything for `10.1.0.*` down this tunnel").
   - `AllowedIPs = 0.0.0.0/0, ::/0` — **full tunnel**: route *all* traffic through this peer
     (VPN-your-whole-connection mode).
 
@@ -242,7 +242,7 @@ Work outward, and use `sudo wg show` first — it's the single most useful diagn
   subnet, `/0` = everything. Higher `/N` = more specific.
 - **`0.0.0.0/0`** — "all IPv4 addresses"; put in `AllowedIPs` to route your whole connection
   through a peer (full tunnel).
-- **Network address** (e.g. `10.20.0.0/24`) — names a subnet, not a machine; the trailing zeros
+- **Network address** (e.g. `10.1.0.0/24`) — names a subnet, not a machine; the trailing zeros
   are the blanked-out host part.
 - **PersistentKeepalive** — periodic tiny packet to hold NAT/firewall holes open.
 - **`wg` vs `wg-quick`** — low-level tool vs. the wrapper that also sets addresses and routes.

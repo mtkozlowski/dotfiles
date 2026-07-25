@@ -7,19 +7,19 @@ occurred and why the fix works.
 
 ## The scenario
 
-- Client reaches **VPS-A** (`10.10.0.0/24`, server `10.10.0.1`) and **VPS-B** (`10.20.0.0/24`,
-  server `10.20.0.1`) from a single config with two `[Peer]` blocks.
-- Broken config: client `[Interface]` had `Address = 10.10.0.2/32, 10.20.0.2/32`. A worked; B did
-  not — ping to `10.20.0.1` timed out although the B handshake succeeded and `wg show` on B listed
-  the peer with `allowed ips: 10.20.0.2/32`.
-- Root cause (empirical): pinging `10.20.0.1`, macOS stamped the packet with source **`10.10.0.2`**
+- Client reaches **VPS-A** (`10.0.0.0/24`, server `10.0.0.1`) and **VPS-B** (`10.1.0.0/24`,
+  server `10.1.0.1`) from a single config with two `[Peer]` blocks.
+- Broken config: client `[Interface]` had `Address = 10.0.0.2/32, 10.1.0.2/32`. A worked; B did
+  not — ping to `10.1.0.1` timed out although the B handshake succeeded and `wg show` on B listed
+  the peer with `allowed ips: 10.1.0.2/32`.
+- Root cause (empirical): pinging `10.1.0.1`, macOS stamped the packet with source **`10.0.0.2`**
   (the interface's *primary* address), even after switching both client addresses to `/24` and even
-  though the route to `10.20.0.0/24` named `10.20.0.2` as source. `tcpdump` on the utun showed
-  `10.10.0.2 > 10.20.0.1`. Server B dropped it: `10.10.0.2` was not in that peer's `AllowedIPs`.
-  `ping -S 10.20.0.2 10.20.0.1` worked, proving the source address was the cause.
-- Fix (working on both devices): give the client a **single** address `Address = 10.10.0.2/24`, and
-  on VPS-B set the client peer to `AllowedIPs = 10.10.0.2/32`, then `wg-quick down/up` so a route to
-  `10.10.0.2/32 dev wg0` is installed. Everything now sources from `10.10.0.2`; both servers accept
+  though the route to `10.1.0.0/24` named `10.1.0.2` as source. `tcpdump` on the utun showed
+  `10.0.0.2 > 10.1.0.1`. Server B dropped it: `10.0.0.2` was not in that peer's `AllowedIPs`.
+  `ping -S 10.1.0.2 10.1.0.1` worked, proving the source address was the cause.
+- Fix (working on both devices): give the client a **single** address `Address = 10.0.0.2/24`, and
+  on VPS-B set the client peer to `AllowedIPs = 10.0.0.2/32`, then `wg-quick down/up` so a route to
+  `10.0.0.2/32 dev wg0` is installed. Everything now sources from `10.0.0.2`; both servers accept
   it; no source-selection ambiguity.
 
 The claims below explain each moving part.
@@ -58,7 +58,7 @@ The public overview page phrases the inbound side as an access-control list:
 
 > "when receiving packets, the list of allowed IPs behaves as a sort of access control list."
 
-Because B's peer had `AllowedIPs = 10.20.0.2/32`, an inner packet whose source was `10.10.0.2`
+Because B's peer had `AllowedIPs = 10.1.0.2/32`, an inner packet whose source was `10.0.0.2`
 "does not route correspondingly for this peer, and is dropped" — silently, exactly as observed.
 
 Sources: [WireGuard whitepaper §2 Cryptokey Routing (PDF)](https://www.wireguard.com/papers/wireguard.pdf) ·
@@ -82,8 +82,8 @@ whitepaper's own worked example assigns a single peer allowed IPs drawn from unr
 > 10.10.10.230/32"
 
 These are arbitrary CIDRs across multiple disjoint prefixes, demonstrating that allowed IPs are
-free-form. This is why VPS-B may legally accept `10.10.0.2/32` — an address *outside* its own
-`10.20.0.0/24` subnet. (Nuance: this is shown by example and by the lack of any prose restriction,
+free-form. This is why VPS-B may legally accept `10.0.0.2/32` — an address *outside* its own
+`10.1.0.0/24` subnet. (Nuance: this is shown by example and by the lack of any prose restriction,
 not by a sentence that says "allowed IPs may be arbitrary" in so many words. The only cross-peer
 constraint WireGuard enforces is that a given prefix maps to exactly one peer per interface.)
 
@@ -95,7 +95,7 @@ Sources: [wg(8) man page](https://git.zx2c4.com/wireguard-tools/about/src/man/wg
 ## Claim 3 — wg-quick installs system routes for each peer's AllowedIPs; plain wg does not
 
 **Verdict: Confirmed (first-party).** Explains why `wg-quick down/up` was required on B to get the
-`10.10.0.2/32 dev wg0` route, and why a `syncconf`-only reload leaves no route.
+`10.0.0.2/32 dev wg0` route, and why a `syncconf`-only reload leaves no route.
 
 `wg-quick(8)` states plainly that route installation is *its* job, derived from allowed IPs:
 
@@ -115,7 +115,7 @@ The routing table is therefore managed by the `ip(8)` (or `route`) half of the w
 `wg(8)`. Plain `wg` / `wg setconf` / `wg syncconf` only load the cryptographic peer configuration
 into the kernel/userspace device; they do not add or remove routes. So on VPS-B, editing the peer
 and running a `syncconf`-style reload updates the source-filter but leaves the routing table
-untouched — the `10.10.0.2/32 dev wg0` route only appears after a full `wg-quick up` (or a manual
+untouched — the `10.0.0.2/32 dev wg0` route only appears after a full `wg-quick up` (or a manual
 `ip route add`). That is precisely why the fix required `wg-quick down/up` rather than a hot reload.
 
 Sources: [wg-quick(8) man page](https://git.zx2c4.com/wireguard-tools/about/src/man/wg-quick.8) ·
@@ -140,7 +140,7 @@ with
 > "CommonPrefixLen(A, B) […] the length of the longest prefix (looking at the most significant, or
 > leftmost, bits) that the two addresses have in common, up to the length of S's prefix."
 
-Under Rule 8, sending to `10.20.0.1` *should* prefer source `10.20.0.2` over `10.10.0.2`. **But
+Under Rule 8, sending to `10.1.0.1` *should* prefer source `10.1.0.2` over `10.0.0.2`. **But
 RFC 6724 does not govern this scenario**, because the traffic is IPv4 and the RFC explicitly scopes
 itself out of IPv4:
 
@@ -148,7 +148,7 @@ itself out of IPv4:
 > possible, but this is not explored further here."
 
 There is **no equivalent standardized default source-selection algorithm for IPv4**. So the "longest
-matching prefix should have picked `10.20.0.2`" intuition is *not* a rule the OS is obligated to
+matching prefix should have picked `10.1.0.2`" intuition is *not* a rule the OS is obligated to
 follow for these addresses. Confidence: **High** that RFC 6724's Rule 8 is real and would prefer the
 same-prefix source; **High** that it does not formally bind the IPv4 case here.
 
@@ -156,9 +156,9 @@ same-prefix source; **High** that it does not formally bind the IPv4 case here.
 
 For IPv4 on a point-to-point `utun`, the source address is effectively decided by the OS routing
 layer / interface primary-address selection, not by a per-address longest-prefix match. In this
-case macOS stamped the interface's *primary* address (`10.10.0.2`) onto packets destined for
-`10.20.0.1`, ignoring both the `/24` mask change and the route's named source — confirmed locally by
-`tcpdump` on the utun (`10.10.0.2 > 10.20.0.1`) and by `ping -S 10.20.0.2 …` succeeding.
+case macOS stamped the interface's *primary* address (`10.0.0.2`) onto packets destined for
+`10.1.0.1`, ignoring both the `/24` mask change and the route's named source — confirmed locally by
+`tcpdump` on the utun (`10.0.0.2 > 10.1.0.1`) and by `ping -S 10.1.0.2 …` succeeding.
 
 The best *documented* corroboration is a WireGuard mailing-list thread on multi-address / multi-home
 source selection, where operators saw the wrong source IP chosen for traffic egressing a WireGuard
@@ -205,18 +205,18 @@ Sources: [NEVPNManager | Apple Developer Documentation](https://developer.apple.
 
 ## What this means for the single-IP fix
 
-- **Two client addresses on one utun was the trap.** With `10.10.0.2` and `10.20.0.2` both on the
-  interface, the OS (not RFC 6724 — that's IPv6-only) chose the *primary* address `10.10.0.2` as the
+- **Two client addresses on one utun was the trap.** With `10.0.0.2` and `10.1.0.2` both on the
+  interface, the OS (not RFC 6724 — that's IPv6-only) chose the *primary* address `10.0.0.2` as the
   source for B-bound traffic. (Claim 4)
 - **B silently dropped it because AllowedIPs is also an inbound source filter.** A decrypted inner
-  packet whose source is not in the sending peer's allowed IPs "is dropped." `10.10.0.2` was not in
-  B's `10.20.0.2/32`. (Claim 1)
-- **Collapsing to one address (`10.10.0.2/24`) removes the ambiguity** — every packet, to A or B,
-  sources from `10.10.0.2`, so there is no source-selection decision left to get wrong. (Claim 4)
+  packet whose source is not in the sending peer's allowed IPs "is dropped." `10.0.0.2` was not in
+  B's `10.1.0.2/32`. (Claim 1)
+- **Collapsing to one address (`10.0.0.2/24`) removes the ambiguity** — every packet, to A or B,
+  sources from `10.0.0.2`, so there is no source-selection decision left to get wrong. (Claim 4)
 - **B can legally accept that foreign address** because AllowedIPs need not be a subset of B's own
-  subnet — `AllowedIPs = 10.10.0.2/32` on B is valid even though B lives on `10.20.0.0/24`. (Claim 2)
+  subnet — `AllowedIPs = 10.0.0.2/32` on B is valid even though B lives on `10.1.0.0/24`. (Claim 2)
 - **`wg-quick down/up` on B was necessary, not optional,** because only wg-quick (via `ip`) installs
-  the `10.10.0.2/32 dev wg0` route from allowed IPs; a plain `wg syncconf` updates the filter but
+  the `10.0.0.2/32 dev wg0` route from allowed IPs; a plain `wg syncconf` updates the filter but
   leaves the routing table stale. (Claim 3)
 - **One config, many peers is the right shape** given the one-active-tunnel platform constraint,
   which is exactly what `wg-peer` assembles. (Claim 5)
