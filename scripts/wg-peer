@@ -1,20 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
-# wg-peer — generate WireGuard peers and assemble combined multi-server client configs.
+# wg-peer — generate WireGuard peers and assemble a combined multi-server client config.
 #
 # Why three subcommands: macOS/iOS run only one tunnel at a time, so to reach
 # several servers at once you need ONE client config with multiple [Peer] blocks.
-# That means one client keypair registered on every server — and a script on one
-# server can't edit another. So: keygen once, `add` on each server, then assemble.
+# That means one client keypair, registered on every server under ONE shared tunnel
+# IP — and a script on one server can't edit another. So: keygen once, `add` on each
+# server (same client IP every time), then assemble.
+#
+# Single-IP model (important): the client gets ONE address, used identically on every
+# server. macOS/iOS always source packets from the interface's primary address, so a
+# client with a different IP per server has its traffic to all-but-one server silently
+# dropped by the far side's AllowedIPs source check. One shared IP removes that choice.
+# Servers whose own subnet does not contain that IP get an explicit host route (added
+# automatically by `add`).
 #
 #   wg-peer keygen <name>
 #       Run once (anywhere). Writes <name>.key (private, 0600) and prints the
 #       public key to register on each server.
 #
-#   wg-peer add <name> <peer-ip/cidr> <client-pubkey> [opts]   (run on each SERVER, as root)
-#       Appends a labeled [Peer] to the server's wg0.conf, hot-reloads, and emits
-#       a <label>.fragment file describing how the client reaches THIS server.
+#   wg-peer add <name> <client-ip> <client-pubkey> [opts]   (run on each SERVER, as root)
+#       Registers the client under the SAME <client-ip> on every server: appends a
+#       labeled [Peer] (AllowedIPs = <client-ip>/32) to the server's wg0.conf,
+#       hot-reloads, adds a host route if <client-ip> is outside this server's subnet,
+#       and emits a <label>.fragment describing how the client reaches THIS server.
 #       opts:
 #         --conf PATH        server config (default: /etc/wireguard/wg0.conf)
 #         --label NAME       fragment label / [Peer] comment (default: hostname)
@@ -25,27 +35,32 @@ set -euo pipefail
 #                            IPv6 literal use bracket form: [2001:db8::1]:51820
 #         --route CIDR[,..]  AllowedIPs the client routes here (default: server's own subnet,
 #                            IPv4 only — pass --route for IPv6). Use 0.0.0.0/0 for a full
-#                            tunnel. Each server must own a DISTINCT subnet: WireGuard maps
-#                            every AllowedIPs prefix to exactly one peer.
+#                            tunnel. Each server must advertise a DISTINCT subnet/route:
+#                            WireGuard maps every AllowedIPs prefix to exactly one peer.
 #
 #   wg-peer assemble <out-name> --key <name>.key [opts] <fragment>...   (run on the CLIENT)
-#       Stitches one [Interface] + every fragment's [Peer] into <out-name>.conf.
+#       Stitches one [Interface] (single shared Address) + every fragment's [Peer]
+#       into <out-name>.conf.
 #       opts:
 #         --dns IP[,IP]      add a DNS line
 #         --qr               also print a QR code (needs qrencode)
 #
 # NOTES / SECURITY
-#   * Distinct subnets: because the client stitches every server into one interface,
-#     no two servers may advertise the same AllowedIPs prefix. Give each its own subnet
-#     (e.g. 10.0.0.0/24, 10.1.0.0/24, ...). 'assemble' refuses to build a config with
-#     duplicate prefixes and warns on overlapping ones.
+#   * One client IP, distinct server routes. Use the SAME <client-ip> in every `add`.
+#     macOS/iOS source every packet from the interface's primary address, so a per-server
+#     client IP gets all-but-one server's traffic dropped. Servers must still advertise
+#     DISTINCT subnets/routes (--route): WireGuard maps each AllowedIPs prefix to one peer,
+#     so 'assemble' refuses duplicate routes and warns on overlaps.
 #   * Fragments carry a preshared key in cleartext. Move them server->client over a
 #     secure channel (scp/age) and delete them once 'assemble' has run.
+#   * Server firewall/ACL rules keyed to the WG subnet: replies now come from the shared
+#     client IP, which may sit outside a server's own subnet. Scope such rules by the WG
+#     interface (e.g. `ufw allow in on wg0`), not the subnet, or they won't match.
 #   * Extending later: keygen ONCE and keep <name>.key + <name>.pub. To add a server,
-#     run 'add' on the new box only (existing servers are untouched), then re-run
-#     'assemble' with all fragments into a new out-name.
-#   * Automatic subnet routing and endpoint autodetection are IPv4-only; pass --route
-#     and --endpoint explicitly for IPv6.
+#     run 'add' on the new box only (existing servers untouched), then re-run 'assemble'
+#     with all fragments into a new out-name.
+#   * Automatic subnet routing, host-route insertion and endpoint autodetection are
+#     IPv4-only; pass --route and --endpoint explicitly for IPv6.
 
 PROG=$(basename "$0")
 
@@ -176,6 +191,19 @@ cmd_add() {
         route=$(ipv4_network "$srvaddr")
     fi
 
+    # Single-IP model: the client uses the SAME address on every server. If that address
+    # falls outside THIS server's own subnet, the kernel has no route back to it (syncconf
+    # loads the peer but never touches the routing table), so replies would leak out the
+    # default interface. Decide now — before mutating the config — whether a host route is
+    # needed; install it after the reload below.
+    local client_route_needed="" srvnet=""
+    if ! is_ipv6 "$peerip" && [ -n "$srvaddr" ] && ! is_ipv6 "$srvaddr"; then
+        case "$srvaddr" in
+            */*) srvnet=$(ipv4_network "$srvaddr")
+                 cidrs_overlap "$peerip" "$srvnet" || client_route_needed=1 ;;
+        esac
+    fi
+
     # Default endpoint = local source IP + ListenPort; third-party lookup only as a fallback.
     if [ -z "$endpoint" ]; then
         local ip; ip=$(detect_local_ipv4)
@@ -219,6 +247,16 @@ cmd_add() {
     wg syncconf "$iface" <(wg-quick strip "$iface")
     echo "Added peer '$name' ($peerip) to $iface and reloaded." >&2
 
+    # Add the host route worked out above. 'ip route replace' is idempotent; the route
+    # becomes permanent on the next 'wg-quick up' (which derives routes from AllowedIPs).
+    if [ -n "$client_route_needed" ]; then
+        if command -v ip >/dev/null 2>&1 && ip -4 route replace "$peerip" dev "$iface" 2>/dev/null; then
+            echo "Client $peerip is outside this server's subnet ($srvnet); added host route via $iface (persists on next 'wg-quick up')." >&2
+        else
+            echo "Warning: client $peerip is outside this server's subnet ($srvnet); add a route so replies use the tunnel:  ip route replace $peerip dev $iface" >&2
+        fi
+    fi
+
     # Client-side fragment. #ADDR lines are consumed by 'assemble' for the [Interface].
     local frag="$label.fragment"
     {
@@ -257,16 +295,28 @@ cmd_assemble() {
     local outfile="$out.conf"
     [ -e "$outfile" ] && die "$outfile already exists — refusing to overwrite"
 
-    # Gather all #ADDR lines into the single [Interface] Address.
-    local addrs=()
-    local f
+    # Gather #ADDR lines into the single [Interface] Address. In the single-IP model every
+    # server registers the SAME client address, so fragments repeat it — dedupe to one.
+    # (Distinct entries from an older per-server-IP setup are preserved but warned about:
+    # that form is unreliable on macOS/iOS, which source from the primary address only.)
+    local addrs=() seen_addr=" "
+    local f line a
     for f in "${frags[@]}"; do
         [ -f "$f" ] || die "fragment not found: $f"
         while IFS= read -r line; do
-            case "$line" in "#ADDR "*) addrs+=("${line#\#ADDR }");; esac
+            case "$line" in
+                "#ADDR "*)
+                    a=${line#\#ADDR }; a=${a//[[:space:]]/}
+                    case "$seen_addr" in
+                        *" $a "*) ;;
+                        *) addrs+=("$a"); seen_addr="$seen_addr$a " ;;
+                    esac
+                    ;;
+            esac
         done <"$f"
     done
     [ "${#addrs[@]}" -gt 0 ] || die "no #ADDR lines found in fragments"
+    [ "${#addrs[@]}" -gt 1 ] && echo "Note: multiple distinct client addresses (${addrs[*]}); macOS/iOS source all peers from the primary address, so the rest are dropped. Register ONE shared client IP on every server." >&2
     local addr_csv; addr_csv=$(IFS=,; echo "${addrs[*]}"); addr_csv=${addr_csv//,/, }
 
     # Collect every AllowedIPs prefix. WireGuard maps each prefix to exactly one peer,
