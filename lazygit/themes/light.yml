@@ -1,0 +1,32 @@
+# Rose Pine Dawn, matching the ghostty light theme.
+#
+# Same rule as the dark overlay: the selected line only gets a background, so
+# every background here is a light surface that the dark foreground reads on.
+#
+# Loaded by `scripts/lazygit` on top of config.yml. See that script.
+gui:
+  theme:
+    activeBorderColor:
+      - "#286983"
+      - bold
+    inactiveBorderColor:
+      - "#9893a5"
+    searchingActiveBorderColor:
+      - "#b4637a"
+      - bold
+    optionsTextColor:
+      - "#286983"
+    selectedLineBgColor:
+      - "#dfdad9"
+    inactiveViewSelectedLineBgColor:
+      - "#f4ede8"
+    cherryPickedCommitFgColor:
+      - "#286983"
+    cherryPickedCommitBgColor:
+      - "#cfe0e2"
+    markedBaseCommitFgColor:
+      - "#b4637a"
+    markedBaseCommitBgColor:
+      - "#f2e9e1"
+    unstagedChangesColor:
+      - "#b4637a"

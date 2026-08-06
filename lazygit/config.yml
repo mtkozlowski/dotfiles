@@ -8,3 +8,8 @@
 # {{text}}, so no extra quoting is needed here.
 os:
   copyToClipboardCmd: tmux set-buffer -w -- {{text}}
+
+# Colors live in themes/dark.yml and themes/light.yml. `scripts/lazygit` works out
+# which background the terminal is using and layers the matching file on top of
+# this one. Running the real binary directly gives you lazygit's stock colors,
+# which are unreadable under both ghostty themes.

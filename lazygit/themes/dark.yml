@@ -1,0 +1,35 @@
+# Gruvbox Material Dark, matching the ghostty dark theme.
+#
+# lazygit paints a selected line by swapping only the background and letting
+# the text keep the terminal foreground. The stock background is ANSI blue,
+# which this palette renders as a light turquoise, so the beige foreground sits
+# on it unreadably. These backgrounds are dark surfaces from the same palette,
+# so beige text stays legible.
+#
+# Loaded by `scripts/lazygit` on top of config.yml. See that script.
+gui:
+  theme:
+    activeBorderColor:
+      - "#a9b665"
+      - bold
+    inactiveBorderColor:
+      - "#5a524c"
+    searchingActiveBorderColor:
+      - "#d8a657"
+      - bold
+    optionsTextColor:
+      - "#7daea3"
+    selectedLineBgColor:
+      - "#45403d"
+    inactiveViewSelectedLineBgColor:
+      - "#32302f"
+    cherryPickedCommitFgColor:
+      - "#7daea3"
+    cherryPickedCommitBgColor:
+      - "#3a4a4a"
+    markedBaseCommitFgColor:
+      - "#d8a657"
+    markedBaseCommitBgColor:
+      - "#473c29"
+    unstagedChangesColor:
+      - "#ea6962"

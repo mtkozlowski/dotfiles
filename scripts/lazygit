@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# lazygit wrapper that matches the terminal's light/dark appearance.
+#
+# lazygit has one theme block and no way to follow the system appearance, while
+# ghostty switches between Rose Pine Dawn and Gruvbox Material Dark. So work out
+# which one is showing and layer the matching overlay from
+# ~/.config/lazygit/themes/ on top of config.yml.
+#
+# Under tmux, `#{client_theme}` is the signal. Ghostty reports theme changes to
+# tmux over OSC 2031, so this value follows the macOS appearance while the
+# session stays attached. It is the same signal driving the client-dark-theme
+# and client-light-theme hooks in tmux.conf.
+#
+# Outside tmux, fall back to asking the terminal for its background color
+# (OSC 11) and judging the brightness.
+#
+# This shadows the real lazygit: ~/dotfiles/scripts comes before the homebrew
+# bin directory on PATH, and the real binary is found below by searching PATH
+# with this script's own directory removed.
+#
+# Set LAZYGIT_THEME=dark or LAZYGIT_THEME=light to pin one and skip the query.
+# Anything unreadable or missing falls back to dark.
+
+set -euo pipefail
+
+self_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+
+# Find the real lazygit by dropping this script's directory from PATH.
+find_real() {
+  local dir stripped=""
+  while IFS= read -r dir; do
+    [[ -z $dir ]] && continue
+    [[ $(cd -- "$dir" 2>/dev/null && pwd -P) == "$self_dir" ]] && continue
+    stripped="${stripped:+$stripped:}$dir"
+  done < <(printf '%s\n' "${PATH//:/$'\n'}")
+  PATH=$stripped command -v lazygit
+}
+
+real=$(find_real) || {
+  echo "lazygit: real binary not found on PATH" >&2
+  exit 127
+}
+
+# Ask tmux what theme the client reported. Prints nothing outside tmux, or when
+# the terminal never told tmux which theme it is using.
+tmux_appearance() {
+  [[ -n ${TMUX:-} ]] || return 0
+  command -v tmux >/dev/null || return 0
+  local value
+  value=$(tmux display-message -p '#{client_theme}' 2>/dev/null) || return 0
+  [[ $value == light || $value == dark ]] && printf '%s' "$value"
+  return 0
+}
+
+# Read the terminal's background color and report "light" or "dark".
+# Prints nothing when the terminal does not answer.
+query_appearance() {
+  # /dev/tty exists with open permissions even when the process has no
+  # controlling terminal, and the open then fails with ENXIO. Suppress that
+  # error so a headless run stays quiet.
+  local saved reply
+  { exec 3</dev/tty 4>/dev/tty; } 2>/dev/null || return 0
+  saved=$(stty -g <&3 2>/dev/null) || return 0
+  stty -echo raw <&3 2>/dev/null || return 0
+
+  printf '\033]11;?\033\\' >&4
+  # A timeout still assigns the partial input, so terminals that end the reply
+  # with BEL instead of ST are handled too. Do not let the timeout fail the
+  # script under `set -e`.
+  reply=""
+  IFS= read -r -t 1 -d '\' -u 3 reply || true
+
+  stty "$saved" <&3 2>/dev/null || true
+  exec 3<&- 4>&-
+
+  # Reply looks like: ESC ] 11 ; rgb:2828/2828/2828 ST
+  # Each component is 1 to 4 hex digits, scaled to the full range, so the two
+  # leading digits are the 8-bit value.
+  [[ $reply =~ rgb:([0-9a-fA-F]+)/([0-9a-fA-F]+)/([0-9a-fA-F]+) ]] || return 0
+  local r g b
+  r=$((16#${BASH_REMATCH[1]:0:2}))
+  g=$((16#${BASH_REMATCH[2]:0:2}))
+  b=$((16#${BASH_REMATCH[3]:0:2}))
+
+  # Rec. 601 luma, integer math. Above half of 255 counts as a light background.
+  if (( (299 * r + 587 * g + 114 * b) / 1000 > 127 )); then
+    printf 'light'
+  else
+    printf 'dark'
+  fi
+}
+
+# An explicit -ucf means the caller is choosing config files, so stay out of it.
+for arg in "$@"; do
+  case $arg in
+    -ucf | --use-config-file) exec "$real" "$@" ;;
+  esac
+done
+
+theme=${LAZYGIT_THEME:-}
+[[ $theme == dark || $theme == light ]] || theme=$(tmux_appearance)
+[[ $theme == dark || $theme == light ]] || theme=$(query_appearance)
+[[ $theme == light ]] || theme=dark
+
+config_dir=$("$real" --print-config-dir)
+base=$config_dir/config.yml
+overlay=$config_dir/themes/$theme.yml
+
+# Without the overlay there is nothing to layer, so let lazygit load normally.
+if [[ -r $base && -r $overlay ]]; then
+  exec "$real" -ucf "$base,$overlay" "$@"
+fi
+exec "$real" "$@"
