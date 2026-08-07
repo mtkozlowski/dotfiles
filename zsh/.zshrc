@@ -5,7 +5,12 @@ zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 ZCOMPDUMP="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump-$ZSH_VERSION"
 [[ -d "${ZCOMPDUMP:h}" ]] || mkdir -p "${ZCOMPDUMP:h}"
 autoload -Uz compinit
-if [[ -n $ZCOMPDUMP(#qN.mh+24) ]]; then
+# `find` rather than a `(#qN.mh+24)` glob qualifier, which silently needs
+# extendedglob: without it the qualifier is not parsed as one, the test is
+# always true, and every shell pays for the full scan. find has no such
+# dependency. Empty output means "missing or fresh", both of which take -C;
+# a missing dump is still written by -C, just without the security scan.
+if [[ -n $(find "$ZCOMPDUMP" -maxdepth 0 -mmin +1440 2>/dev/null) ]]; then
     compinit -d "$ZCOMPDUMP"
 else
     compinit -C -d "$ZCOMPDUMP"
@@ -24,12 +29,16 @@ elif [[ -f "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
     eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 
-export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense' # optional
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 # zstyle ':completion:*' menu select interactive
 zstyle ':completion:*' menu select search
 zstyle ':completion:*' list-prompt ''
-source <(carapace _carapace)
+
+# carapace completions. Sourced here rather than alongside op.zsh at the end of
+# this file: it needs compinit above, and must precede the syntax-highlighting
+# plugin below.
+[[ -f "${ZDOTDIR:-$HOME/.config/zsh}/carapace.zsh" ]] \
+    && source "${ZDOTDIR:-$HOME/.config/zsh}/carapace.zsh"
 
 # Plugins: self-installing, no plugin manager, identical on macOS + Linux.
 # (Previously these were sourced only when Homebrew was present, so a bare
