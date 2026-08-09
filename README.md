@@ -34,10 +34,16 @@ stowing the repo symlinks each package there (e.g. `~/.config/nvim -> dotfiles/n
 ```sh
 git clone https://github.com/<you>/dotfiles ~/dotfiles
 cd ~/dotfiles
-stow .                        # links every package into ~/.config
-stow --target="$HOME" home    # the one package that targets $HOME, not ~/.config
+stow .                                     # links every package into ~/.config
+stow --no-folding --target="$HOME" home    # the one package that targets $HOME, not ~/.config
 git config core.hooksPath .githooks   # enable the secret-scanning pre-commit hook
 ```
+
+`--no-folding` is required for the `home` package. `~/.codex` and `~/.claude` are
+directories the tools write runtime state into (caches, sqlite databases, credentials).
+Folding would replace such a directory with a single symlink into the repo, so every
+byte the tool wrote would land in the git tree. With `--no-folding`, `~/.codex` stays a
+real directory holding one symlink per tracked file.
 
 zsh is loaded via `ZDOTDIR="$XDG_CONFIG_HOME/zsh"` (set in `~/.zshenv`), so
 `~/.config/zsh/.zshrc` is the entrypoint.

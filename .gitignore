@@ -36,4 +36,9 @@ gh-dash/repoPaths.local.yml
 
 gh/hosts.yml
 ghostty/ghostty-shaders
+
+# worktrunk runtime state, written back through the folded symlink. The tracked
+# file is config.toml only; approvals record per-machine command grants.
 worktrunk/config.toml.lock
+worktrunk/approvals.toml
+worktrunk/approvals.toml.lock
