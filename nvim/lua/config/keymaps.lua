@@ -28,3 +28,11 @@ require("snacks").util.on_module("which-key", function()
     { "<leader>ub", desc = "Cycle background: dark/light/auto", icon = { icon = "󰔎", color = "yellow" } },
   })
 end)
+
+-- Open an empty comment and start typing in it. The marker matches the filetype
+-- and the treesitter node under the cursor, so a lua fence inside markdown gets
+-- `--` while the prose around it gets `<!-- -->`. See lua/util/comment.lua.
+local comment = require("util.comment")
+vim.keymap.set("n", "gco", comment.below, { desc = "Comment on line below" })
+vim.keymap.set("n", "gcO", comment.above, { desc = "Comment on line above" })
+vim.keymap.set("n", "gcA", comment.eol, { desc = "Comment at end of line" })
