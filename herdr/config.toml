@@ -1,0 +1,70 @@
+onboarding = false
+# Herdr: terminal workspace manager for coding agents.
+# Validate with `herdr config check`, apply with `herdr server reload-config`.
+
+[theme]
+name = "gruvbox"
+auto_switch = false
+
+[keys]
+prefix = "ctrl+a"
+
+# prefix+g runs lazygit below, so the session navigator moves off g.
+goto = "prefix+slash"
+
+# lazygit in a popup, the same key and geometry as the tmux binding in
+# tmux/tmux.reset.conf. A popup floats over the tiled layout and closes when the
+# command exits. Herdr starts it in the focused pane's working directory, and
+# `lazygit` resolves to the theme wrapper in scripts/lazygit because
+# ~/dotfiles/scripts comes first on PATH. That wrapper reads the background color
+# over OSC 11, which Herdr answers, so the light and dark themes still follow the
+# terminal.
+[[keys.command]]
+key = "prefix+g"
+type = "popup"
+command = "lazygit"
+width = "90%"
+height = "90%"
+description = "lazygit (popup)"
+
+# gh dash in a popup. There is no tmux equivalent, `gh dash` runs in a plain
+# window there. The popup inherits GH_DASH_CONFIG from the Herdr server, so it
+# reads the assembled config from gh-dash/config.base.yml.
+#
+# The G, C, O and Y keys inside gh-dash go through scripts/mux-open and
+# scripts/mux-copy, which create a Herdr tab here and a tmux window under tmux.
+# A popup is modal, so a tab those keys create waits behind it until gh-dash
+# exits.
+[[keys.command]]
+key = "prefix+u"
+type = "popup"
+command = "gh dash"
+width = "90%"
+height = "90%"
+description = "gh dash (popup)"
+
+[ui]
+status_indicators = "symbols"
+
+# herdr thumbs keybindings
+# Copy a match. prefix+space is tmux-thumbs' default key.
+agent_panel_sort = "spaces"
+[[keys.command]]
+key = "prefix+space"
+type = "plugin_action"
+command = "sd2k.thumbs.pick"
+description = "pick text"
+
+# Copy several matches. Space during a normal pick does this too.
+[[keys.command]]
+key = "prefix+alt+space"
+type = "plugin_action"
+command = "sd2k.thumbs.pick-multi"
+description = "pick several"
+
+# Open a match instead of copying it: editor, browser or git show.
+[[keys.command]]
+key = "prefix+o"
+type = "plugin_action"
+command = "sd2k.thumbs.pick-open"
+description = "pick text (open)"

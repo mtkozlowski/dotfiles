@@ -9,6 +9,7 @@
 --ignore=^\.superpowers$
 --ignore=^\.a5c$
 --ignore=^home$
+--ignore=^herdr$
 # Repo docs, not config. stow's built-in ignore list already covers README.*,
 # but not other top-level docs, which would otherwise land in ~/.config.
 --ignore=^wireguard-guide\.md$

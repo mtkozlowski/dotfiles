@@ -13,6 +13,7 @@ clean separation between what's safe to publish and what stays private.
 | `nushell`    | [nushell](https://www.nushell.sh/) | structured-data shell, used alongside zsh |
 | `nvim`       | [Neovim](https://neovim.io/) | LazyVim-based config |
 | `tmux`       | [tmux](https://github.com/tmux/tmux) | session persistence; OSC 52 yank for headless VPSs |
+| `herdr`      | [herdr](https://herdr.dev/) | workspaces, tabs and panes for coding agents; lazygit popup on `prefix+g`, gh dash on `prefix+u` |
 | `yazi`       | [yazi](https://github.com/sxyazi/yazi) | terminal file manager + plugins |
 | `gh-dash`    | [gh-dash](https://www.gh-dash.dev/) | GitHub PR/issue dashboard with a custom PR-review pipeline |
 | `atuin`      | [atuin](https://atuin.sh/) | SQLite shell history with sync |
@@ -36,6 +37,7 @@ git clone https://github.com/<you>/dotfiles ~/dotfiles
 cd ~/dotfiles
 stow .                                     # links every package into ~/.config
 stow --no-folding --target="$HOME" home    # the one package that targets $HOME, not ~/.config
+stow --no-folding --target="$HOME/.config/herdr" herdr   # see below
 git config core.hooksPath .githooks   # enable the secret-scanning pre-commit hook
 ```
 
@@ -44,6 +46,11 @@ directories the tools write runtime state into (caches, sqlite databases, creden
 Folding would replace such a directory with a single symlink into the repo, so every
 byte the tool wrote would land in the git tree. With `--no-folding`, `~/.codex` stays a
 real directory holding one symlink per tracked file.
+
+`herdr` is ignored in `.stowrc` for the same reason, and stowed with its own target.
+Herdr writes `herdr.sock`, `herdr-server.log` and `session.json` into `~/.config/herdr`,
+so that directory has to stay real. The target names the directory itself, because the
+package holds the config file rather than a directory to link.
 
 zsh is loaded via `ZDOTDIR="$XDG_CONFIG_HOME/zsh"` (set in `~/.zshenv`), so
 `~/.config/zsh/.zshrc` is the entrypoint.
