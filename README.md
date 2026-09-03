@@ -80,6 +80,27 @@ Scope: only rules that hold in **every** repo on **both** platforms belong here,
 file is loaded in full on every agent session. Machine-specific facts (which Postgres
 cluster, whether Docker exists) stay in that agent's own per-project memory.
 
+## Telegram notifications (`/afk`)
+
+Claude Code sessions can ping a Telegram bot when the agent finishes a turn, asks for
+input or permission, or ends. Useful when a long task runs and you leave the terminal.
+
+```
+home/.claude/hooks/telegram-notify.sh   the switch and the sender, one file
+home/.claude/commands/afk.md            the /afk slash command
+home/.claude/telegram.env.local.example credentials template (copy, never commit)
+```
+
+`/afk` flips the switch for the current session only, so every other session stays quiet.
+`/afk on`, `/afk off` and `/afk status` are explicit. Turning it on sends a test message and
+refuses to stay on if Telegram rejects it. State lives in
+`$XDG_STATE_HOME/claude-telegram/<session-id>` and is dropped when the session ends.
+
+Per-machine setup is two steps, both described in the script header: copy the credentials
+template to `~/.claude/telegram.env.local` (a value may be an `op://` reference instead of
+a literal), then register the `Notification`, `Stop` and `SessionEnd` hooks in
+`~/.claude/settings.json`, which stays untracked because it also holds machine state.
+
 ## Private overlay
 
 The repo is public, so it contains **only generic, shareable config**. Anything
