@@ -70,23 +70,25 @@ bindkey '^j' down-line-or-search
 export LANG=en_US.UTF-8
 export EDITOR="$(command -v nvim || command -v vim)"
 
-# bat: on Debian/Ubuntu the binary ships as `batcat` (and fd as `fdfind`),
-# because of a package name clash. Resolve each to a single name that works on
-# every machine, so `bat`/`fd` behave identically on macOS and the VPSes.
-if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
-    alias bat='batcat'
-    BAT_BIN='batcat'
-elif command -v bat >/dev/null 2>&1; then
-    BAT_BIN='bat'
-fi
-if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
-    alias fd='fdfind'
-fi
+# bat/fd: on Debian/Ubuntu these binaries ship as `batcat`/`fdfind` because of a
+# package name clash. Symlink the plain name into ~/.local/bin so `bat` and `fd`
+# behave identically on macOS and the VPSes. A symlink rather than an alias,
+# because the commands also run in non-interactive shells that never read
+# aliases: television channels, $MANPAGER, editor subprocesses.
+_shim_debian_binary() {   # <plain-name> <debian-name>
+    command -v "$1" >/dev/null 2>&1 && return
+    local target
+    target="$(command -v "$2" 2>/dev/null)" || return
+    mkdir -p "$HOME/.local/bin"
+    ln -s "$target" "$HOME/.local/bin/$1" && rehash
+}
+_shim_debian_binary bat batcat
+_shim_debian_binary fd fdfind
+unset -f _shim_debian_binary
 
-# Render man pages through bat (syntax-highlighted, paged). Uses the resolved
-# binary name, not the alias, because $MANPAGER runs in a non-interactive shell.
-if [[ -n "$BAT_BIN" ]]; then
-    export MANPAGER="sh -c 'col -bx | $BAT_BIN -l man -p'"
+# Render man pages through bat (syntax-highlighted, paged).
+if command -v bat >/dev/null 2>&1; then
+    export MANPAGER="sh -c 'col -bx | bat -l man -p'"
     export MANROFFOPT="-c"   # avoids formatting glitches with newer groff
 fi
 
