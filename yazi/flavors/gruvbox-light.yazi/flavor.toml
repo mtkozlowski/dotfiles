@@ -36,16 +36,6 @@ border_symbol = "│"
 border_style  = { fg = "#bdae93" }
 # : }}}
 
-
-# : Indicator {{{
-
-[indicator]
-# Preview hover: bg block, not yazi's default underline (reads as false indicator).
-preview = { fg = "#fbf1c7", bg = "#7c6f64" }
-
-# : }}}
-
-
 # : Tabs {{{
 
 [tabs]
@@ -81,7 +71,8 @@ unset_alt  = { fg = "#7c6f64", bg = "#d5c4a1" }
 [indicator]
 parent  = { bg = "#d5c4a1" }
 current = { bg = "#d5c4a1" }
-preview = { underline = true }
+# Preview hover: bg block, not yazi's default underline (reads as false indicator).
+preview = { fg = "#fbf1c7", bg = "#7c6f64" }
 padding = { open = "█", close = "█" }
 
 # : }}}
