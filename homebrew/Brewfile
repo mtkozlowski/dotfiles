@@ -1,7 +1,6 @@
 tap "anomalyco/tap", trusted: true
 tap "dlvhdr/formulae"
 tap "felixkratz/formulae", "https://github.com/FelixKratz/homebrew-formulae", trusted: true
-tap "homebrew/services"
 tap "keith/formulae", trusted: true
 tap "lzhgus/tap", trusted: true
 tap "modem-dev/tap"
@@ -40,22 +39,26 @@ brew "flock"
 brew "fnm"
 # Command-line fuzzy finder written in Go
 brew "fzf"
+# Command-line downloader for image-hosting site galleries and collections
+brew "gallery-dl"
 # GitHub command-line tool
 brew "gh"
 # OCR (Optical Character Recognition) engine
 brew "tesseract"
 # Syntax-highlighting pager for git and diff output
 brew "git-delta"
+# Audit git repos for secrets
+brew "gitleaks"
 # Render markdown on the CLI
 brew "glow"
 # GNU Transport Layer Security (TLS) Library
 brew "gnutls"
 # Directory/file & DNS busting tool written in Go
 brew "gobuster"
-# Validating, recursive, caching DNS resolver
-brew "unbound"
 # Graph visualization software from AT&T and Bell Labs
 brew "graphviz"
+# Post-modern modal text editor
+brew "helix"
 # HTTP load generator, ApacheBench (ab) replacement
 brew "hey"
 # Tools and libraries to manipulate images in select formats
@@ -76,6 +79,8 @@ brew "make"
 brew "md5sha1sum", link: true
 # Deep clean and optimize your Mac
 brew "mole"
+# NCurses Disk Usage
+brew "ncdu"
 # Ambitious Vim-fork focused on extensibility and agility
 brew "neovim"
 # Port scanning utility for large networks
@@ -106,6 +111,8 @@ brew "tlrc"
 brew "tmux"
 # Display directories as trees (with optional color/HTML output)
 brew "tree"
+# Validating, recursive, caching DNS resolver
+brew "unbound"
 # Compress/expand executable files
 brew "upx"
 # Extremely fast Python package installer and resolver, written in Rust
@@ -122,8 +129,6 @@ brew "wireguard-tools"
 brew "worktrunk"
 # Blazing fast terminal file manager written in Rust, based on async I/O
 brew "yazi"
-# Feature-rich command-line audio/video downloader
-brew "yt-dlp"
 # Shell extension to navigate your filesystem faster
 brew "zoxide"
 # Git diff pager based on delta but with a file tree, à la GitHub
@@ -145,6 +150,8 @@ cask "basictex"
 cask "caffeine"
 # Open-source screenshot and screen recording for macOS
 cask "lzhgus/tap/capso"
+# Menu bar usage monitor for Codex and Claude
+cask "codexbar"
 # Browser for SQLite databases
 cask "db-browser-for-sqlite"
 # Terminal emulator that uses platform-native UI and GPU acceleration
@@ -179,7 +186,5 @@ go "golang.org/x/tools/gopls"
 go "github.com/jackyzha0/hugo-obsidian"
 go "github.com/tp86/legimi-go"
 uv "graphifyy"
-npm "@earendil-works/pi-coding-agent"
-npm "@nestjs/cli"
+uv "pre-commit"
 npm "corepack"
-npm "llm-checker"
