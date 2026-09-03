@@ -3,7 +3,7 @@ add_newline = false
 format = """$directory$character"""
 palette = "catppuccin_mocha"
 # move the rest of the prompt to the right
-right_format = """$all"""
+right_format = """${custom.gh_pr}$all"""
 command_timeout = 1000
 
 [aws]
@@ -25,6 +25,8 @@ truncation_symbol = '.../'
 
 [git_branch]
 format =  '[$symbol$branch(:$remote_branch)]($style)'
+truncation_length = 20
+truncation_symbol = '…'
 
 [golang]
 disabled = true
@@ -51,6 +53,22 @@ disabled = true
 disabled = true
 
 ## CUSTOM
+
+# Shows the current branch's GitHub PR number, plus the number of the first
+# issue it closes (from "Closes #N" etc. in the PR body), when one exists.
+# A custom module only renders when `when` succeeds, so the PR check runs
+# there; `command` calls the same script again to build the display string.
+# gh-pr.sh caches gh's answer for 30s so the second call is a file read.
+# A cold shell can make the first `gh` call take longer than starship's
+# default command_timeout, so ignore_timeout defers to the script's own
+# timeout instead of starship warning and giving up.
+[custom.gh_pr]
+when = '~/.config/starship/scripts/gh-pr.sh >/dev/null 2>&1'
+command = '~/.config/starship/scripts/gh-pr.sh'
+format = '[$symbol$output]($style) '
+symbol = ' '
+style = 'bold mauve'
+ignore_timeout = true
 
 # [custom.node_version_mismatch]
 # command = "test -f .nvmrc && [ $(cat .nvmrc) != $(node -v) ] && echo '🚨 NODE MISMATCH'"
