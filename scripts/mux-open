@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# Open a command in a new window of whichever multiplexer is running.
+#
+# gh-dash keybindings need one command string that works under tmux and under
+# herdr, because the same gh-dash/config.base.yml is assembled on every machine
+# and gh dash runs both inside tmux windows and inside herdr popups.
+#
+#   mux-open <name> <cwd> <command>
+#
+# herdr: create a tab labelled <name> in <cwd> and run <command> in its root
+# pane. tmux: new-window with the same name, directory and startup command.
+# Neither: run <command> in <cwd> right here, so a bare terminal still works.
+#
+# A <cwd> of - leaves the directory to the multiplexer, for commands that must
+# not depend on a repo path being known.
+#
+# Called from gh-dash with an unquoted {{.RepoPath}}, so the calling shell
+# already expanded a leading ~. Expand it again here for direct callers.
+
+set -euo pipefail
+
+if [[ $# -lt 3 ]]; then
+  echo "usage: mux-open <name> <cwd> <command>" >&2
+  exit 2
+fi
+
+name=$1
+cwd=$2
+shift 2
+cmd=$*
+
+[[ $cwd == "~" ]] && cwd=$HOME
+[[ $cwd == "~/"* ]] && cwd=$HOME/${cwd#\~/}
+
+if [[ -n ${HERDR_SOCKET_PATH:-} ]]; then
+  herdr=${HERDR_BIN_PATH:-herdr}
+  args=(tab create --label "$name" --focus)
+  [[ $cwd != - ]] && args+=(--cwd "$cwd")
+  pane=$("$herdr" "${args[@]}" | jq -er '.result.root_pane.pane_id')
+  # The tab starts an interactive shell, so send the command as typed input.
+  "$herdr" pane run "$pane" "$cmd" >/dev/null
+  exit 0
+fi
+
+if [[ -n ${TMUX:-} ]]; then
+  args=(new-window -n "$name")
+  [[ $cwd != - ]] && args+=(-c "$cwd")
+  exec tmux "${args[@]}" "$cmd"
+fi
+
+[[ $cwd != - ]] && cd "$cwd"
+exec "${SHELL:-/bin/sh}" -c "$cmd"

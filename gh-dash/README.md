@@ -54,15 +54,31 @@ Defined once in `config.base.yml`, shared across machines:
 
 | Key | View | Action |
 |---|---|---|
-| `G` | any | New tmux window with `lazygit` for the row's repo |
-| `C` | PR | New tmux window → `wt` creates a worktree for the PR → `claude` launches pre-prompted to review the diff |
-| `O` | PR | New tmux window with the PR open in [Octo](https://github.com/pwntester/octo.nvim) (nvim) for hands-on review |
+| `G` | any | New window with `lazygit` for the row's repo |
+| `Y` | PR, issue | Copy the row's URL to the system clipboard |
+| `C` | PR | New window → `wt` creates a worktree for the PR → `claude` launches pre-prompted to review the diff |
+| `O` | PR | New window with the PR open in [Octo](https://github.com/pwntester/octo.nvim) (nvim) for hands-on review |
 
 `C` and `G` need `{{.RepoPath}}` to resolve, so they require a `repoPaths` entry. `O` uses `{{.RepoName}}` (owner/repo) and loads the PR via the gh API, so it works without a local clone.
 
+"New window" means a tmux window under tmux and a tab under [herdr](https://herdr.dev/),
+because `gh dash` runs in both: a plain tmux window, and a herdr popup on `prefix+u`.
+The keys reach the right one through two helpers in `scripts/`:
+
+| Helper | tmux | herdr | neither |
+|---|---|---|---|
+| `mux-open <name> <cwd> <command>` | `new-window -n -c` | `tab create` then `pane run` | runs the command here |
+| `mux-copy <text>` | `set-buffer -w` | OSC 52 to the terminal | OSC 52 to the terminal |
+
+A `<cwd>` of `-` leaves the directory to the multiplexer. `O` uses it, because
+`{{.RepoPath}}` errors when the repo has no `repoPaths` entry.
+
+A herdr popup is modal, so a tab that `G`, `C` or `O` creates waits behind the
+popup until gh-dash exits.
+
 ## Required binaries
 
-`gh`, `gh-dash` (`gh extension install dlvhdr/gh-dash`), `delta`, `wt` (worktrunk), `tmux`, `lazygit`, `nvim` (with `octo.nvim` — see `~/dotfiles/nvim/lua/plugins/octo.lua`), and `claude` (or `opencode` if you swap the `C` keybinding).
+`gh`, `gh-dash` (`gh extension install dlvhdr/gh-dash`), `delta`, `wt` (worktrunk), `jq` (used by `mux-open` under herdr), `tmux`, `lazygit`, `nvim` (with `octo.nvim` — see `~/dotfiles/nvim/lua/plugins/octo.lua`), and `claude` (or `opencode` if you swap the `C` keybinding).
 
 ## Why `config.yml` is gitignored
 

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#
+# Copy text to the system clipboard from inside any multiplexer.
+#
+#   mux-copy <text>
+#
+# The headless VPS has no clipboard utility (no xclip, wl-copy or pbcopy), so
+# both paths hand the text to the outer terminal instead:
+#
+#   tmux:  set-buffer -w, which tmux forwards as OSC 52
+#   else:  OSC 52 written straight to the pane's terminal, which herdr forwards
+#
+# Used by the gh-dash Y bindings, which override gh-dash's built-in copyurl
+# because that one shells out to a clipboard utility.
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "usage: mux-copy <text>" >&2
+  exit 2
+fi
+
+text=$*
+
+if [[ -n ${TMUX:-} ]]; then
+  exec tmux set-buffer -w -- "$text"
+fi
+
+encoded=$(printf '%s' "$text" | base64 | tr -d '\n')
+
+# Prefer the terminal itself: stdout may be captured by the calling program.
+if { exec 3>/dev/tty; } 2>/dev/null; then
+  printf '\033]52;c;%s\033\\' "$encoded" >&3
+  exec 3>&-
+else
+  printf '\033]52;c;%s\033\\' "$encoded"
+fi

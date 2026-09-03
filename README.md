@@ -22,7 +22,7 @@ clean separation between what's safe to publish and what stays private.
 | `sesh`       | [sesh](https://github.com/joshmedeski/sesh) | tmux session manager |
 | `aerospace`  | [AeroSpace](https://github.com/nikitabobko/AeroSpace) | tiling WM (macOS) |
 | `vim`        | vim | minimal fallback `.vimrc` |
-| `scripts`    | — | helpers, incl. `bup` (summarizes what `brew upgrade` changes) |
+| `scripts`    | — | helpers, incl. `bup` (summarizes what `brew upgrade` changes) and `mux-open`/`mux-copy` (same command under tmux and herdr) |
 | `agents`     | — | `AGENTS.md`: universal working agreements shared by every coding agent |
 | `home`       | — | files that belong in `$HOME` rather than `~/.config` (see below) |
 
