@@ -172,3 +172,7 @@
 #         op run --env-file=agents.refs.env -- <dispatcher-command>
 #   • Or pull one secret on demand into the current shell (use sparingly):
 #         openv GITHUB_TOKEN op://Private/GitHub/token
+#
+# --- information on the terminal used is lost in tmux, that's why it needs declaring it on VPS
+# The portable version forwards the real value instead: add SendEnv TERM_PROGRAM TERM_PROGRAM_VERSION on the client, AcceptEnv TERM_PROGRAM TERM_PROGRAM_VERSION in the VPS sshd config, set -ga update-environment TERM_PROGRAM in tmux.conf, then re-export it from the tmux session environment in .zshrc because tmux still shadows it per pane.
+# export TERM_PROGRAM=ghostty
