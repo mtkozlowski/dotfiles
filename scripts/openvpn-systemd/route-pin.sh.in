@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Pin the allowlisted host's current addresses onto the tunnel device.
+#
+# Rendered from route-pin.sh.in by install.sh — edit the template, not the
+# installed copy. Values are substituted in rather than sourced at runtime so
+# this root-executed script stays self-contained and never reads its
+# configuration out of a user-writable home directory.
+#
+# The host sits behind an egress IP allowlist, so traffic must leave through the
+# tunnel or the CDN in front of it answers 403. The CDN's anycast answer is
+# vantage-dependent, so addresses are resolved against the tunnel's own
+# resolver; a public resolver returns different addresses that would be pinned
+# to a path the allowlist rejects.
+#
+# Run as a periodic oneshot unit rather than only as openvpn's --route-up:
+# route-up fires once per connect, so a session that stays up for days never
+# re-resolves and the pins silently go stale when the answer changes.
+set -euo pipefail
+
+HOST="${HOST:-@HOST@}"
+DEV="${dev:-@DEV@}"        # openvpn sets $dev when invoked as a route hook
+DNS="${DNS:-@DNS@}"
+
+# Nothing to pin onto while the tunnel is down; a later run picks it up.
+ip link show "$DEV" >/dev/null 2>&1 || exit 0
+
+mapfile -t want < <(dig +short +time=3 +tries=2 "$HOST" A "@$DNS" \
+                    | grep -E '^[0-9]+(\.[0-9]+){3}$' | sort -u)
+
+# An empty answer means the resolver is unreachable, not that the host moved.
+# Keeping the existing pins is the safe reading.
+[[ ${#want[@]} -gt 0 ]] || exit 0
+
+for ip in "${want[@]}"; do
+  ip route replace "$ip/32" dev "$DEV"
+done
+
+# Drop pins for addresses the host no longer answers with, so a rotated
+# anycast address is not left black-holed into the tunnel.
+while read -r pinned; do
+  [[ -n "$pinned" ]] || continue
+  for ip in "${want[@]}"; do
+    [[ "$pinned" == "$ip" ]] && continue 2
+  done
+  ip route del "$pinned/32" dev "$DEV" 2>/dev/null || true
+done < <(ip route show dev "$DEV" | awk '$2 == "scope" && $1 ~ /^[0-9]+\./ {print $1}')

@@ -1,0 +1,12 @@
+[Unit]
+Description=Re-resolve and re-pin allowlisted host tunnel routes
+
+[Timer]
+# The DNS answer carries a short TTL (tens of seconds), so a minute of drift is
+# the practical floor on how stale a pin can get.
+OnActiveSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

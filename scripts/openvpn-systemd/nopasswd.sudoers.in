@@ -1,0 +1,17 @@
+# Let `vpn` drive exactly these units without a password prompt. Enumerated per
+# verb and per unit: a wildcard here would hand out control of every service on
+# the host. Rendered by install.sh.
+#
+# Deliberately NOT included: systemd-creds encrypt. Credential provisioning is a
+# rare, deliberate act and should still cost a password prompt.
+
+Cmnd_Alias VPN_CTL = \
+  /usr/bin/systemctl start @VPN_UNIT@ @VPN_ROUTE_UNIT@, \
+  /usr/bin/systemctl start @VPN_UNIT@, \
+  /usr/bin/systemctl start @VPN_ROUTE_UNIT@, \
+  /usr/bin/systemctl stop @VPN_UNIT@, \
+  /usr/bin/systemctl restart @VPN_UNIT@, \
+  /usr/bin/systemctl enable --now @VPN_UNIT@ @VPN_ROUTE_TIMER@, \
+  /usr/bin/systemctl disable --now @VPN_UNIT@ @VPN_ROUTE_TIMER@
+
+@VPN_SUDO_USER@ ALL=(root) NOPASSWD: VPN_CTL

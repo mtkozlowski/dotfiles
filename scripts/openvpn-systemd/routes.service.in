@@ -1,0 +1,8 @@
+[Unit]
+Description=Pin allowlisted host routes onto the OpenVPN tunnel
+After=@VPN_UNIT@
+BindsTo=@VPN_UNIT@
+
+[Service]
+Type=oneshot
+ExecStart=/etc/openvpn/route-pin.sh

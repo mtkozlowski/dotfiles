@@ -1,0 +1,29 @@
+# Template for ~/.config/vpn/site.conf (mode 0600).
+#
+# Every value here names internal infrastructure, so the real file lives
+# outside this repository rather than relying on .gitignore. Copy this, fill it
+# in, then run ./install.sh.
+
+# systemd units. VPN_UNIT is an instance of the packaged openvpn-client@
+# template, so the instance name must match /etc/openvpn/client/<name>.conf.
+VPN_UNIT=openvpn-client@USER.service
+VPN_ROUTE_UNIT=openvpn-ROUTES.service
+VPN_DEV=tun0
+
+# The host behind the tunnel's egress IP allowlist, and the resolver to ask for
+# its address. Resolve through the tunnel's own DNS: an allowlisted host that
+# sits behind an anycast CDN answers with different addresses depending on
+# where the query comes from, and only the tunnel's answer is routable there.
+VPN_PROBE_HOST=host.example.internal
+VPN_DNS=10.0.0.1
+
+# 1Password references for the two credential fields, and where the encrypted
+# credential lands. VPN_CRED_NAME must match the LoadCredentialEncrypted name.
+VPN_OP_ITEM=op://VAULT/ITEM/username
+VPN_OP_PASS=op://VAULT/ITEM/password
+VPN_CRED_NAME=vpnauth
+VPN_CRED_DEST=/etc/openvpn/client/USER.auth.cred
+VPN_OVPN_CONF=/etc/openvpn/client/USER.conf
+
+# User granted password-free systemctl control of the units above.
+VPN_SUDO_USER=your-username

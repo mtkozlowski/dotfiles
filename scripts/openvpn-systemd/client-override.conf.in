@@ -1,0 +1,19 @@
+# Drop-in for @VPN_UNIT@.
+# Rendered by install.sh; installed to
+# /etc/systemd/system/@VPN_UNIT@.d/override.conf
+
+[Service]
+# The packaged openvpn-client@ template has no Restart=, so a tunnel that dies
+# stays dead until someone notices.
+Restart=on-failure
+RestartSec=10s
+
+# The route script shells out to dig/awk/ip; the template's LimitNPROC=10 is
+# tight enough that a --route-up hook can hit it.
+LimitNPROC=64
+
+# Credentials are decrypted at start into /run/credentials/%N (tmpfs, 0400
+# root, removed on stop), so the password is never at rest in plaintext. The
+# openvpn config's auth-user-pass must point at:
+#   /run/credentials/@VPN_UNIT@/@VPN_CRED_NAME@
+LoadCredentialEncrypted=@VPN_CRED_NAME@:@VPN_CRED_DEST@
