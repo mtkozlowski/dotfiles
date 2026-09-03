@@ -14,8 +14,18 @@ set -euo pipefail
 fail=0
 
 # 1. gitleaks (if installed) — scans the staged diff for known secret shapes.
+# `gitleaks git --staged` supersedes `gitleaks protect --staged`: protect is now a
+# hidden, deprecated alias (absent from --help) and will eventually be removed.
+# Probe for the new subcommand rather than assuming it — a machine on an older
+# gitleaks would otherwise fail the scan on every commit, and the message below
+# would blame a secret that isn't there.
 if command -v gitleaks >/dev/null 2>&1; then
-  if ! gitleaks protect --staged --redact --no-banner; then
+  if gitleaks git --help >/dev/null 2>&1; then
+    gitleaks_scan=(gitleaks git --staged --redact --no-banner)
+  else
+    gitleaks_scan=(gitleaks protect --staged --redact --no-banner)
+  fi
+  if ! "${gitleaks_scan[@]}"; then
     echo "✗ gitleaks flagged a potential secret in the staged changes." >&2
     fail=1
   fi
