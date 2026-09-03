@@ -1,4 +1,6 @@
-start-at-login = true
+config-version = 1
+
+start-at-login = false
 
 enable-normalization-flatten-containers = true
 enable-normalization-opposite-orientation-for-nested-containers = true
