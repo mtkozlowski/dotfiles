@@ -13,3 +13,5 @@
 # but not other top-level docs, which would otherwise land in ~/.config.
 --ignore=^wireguard-guide\.md$
 --ignore=^vps$
+--ignore=^CONFIG-INVENTORY\.md$
+--ignore=^managing-a-dev-workflow-across-a-macos-laptop-and-multiple-ubuntu-vpss\.md$
