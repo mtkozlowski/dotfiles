@@ -80,6 +80,21 @@ Scope: only rules that hold in **every** repo on **both** platforms belong here,
 file is loaded in full on every agent session. Machine-specific facts (which Postgres
 cluster, whether Docker exists) stay in that agent's own per-project memory.
 
+## tmux alerts from an agent pane
+
+A pane raises a tmux window alert when its agent stops and waits for me. tmux does
+the alerting side for any agent (`monitor-bell on`, `bell-action any`), so each agent
+only has to write the BEL byte:
+
+| Agent | How it rings |
+|-------|--------------|
+| Claude Code | `preferredNotifChannel: terminal_bell` in `~/.claude/settings.json` |
+| pi | `home/.pi/agent/extensions/terminal-bell.ts`, since pi has no such setting |
+
+The pi extension rings on `agent_settled` and on `ui_prompt_start`, the two moments pi
+hands control back. It stays quiet outside the TUI, so `-p`, JSON and RPC runs and
+subagents do not ring.
+
 ## Telegram notifications (`/afk`)
 
 Claude Code sessions can ping a Telegram bot when the agent finishes a turn, asks for
