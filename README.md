@@ -116,6 +116,29 @@ template to `~/.claude/telegram.env.local` (a value may be an `op://` reference 
 a literal), then register the `Notification`, `Stop` and `SessionEnd` hooks in
 `~/.claude/settings.json`, which stays untracked because it also holds machine state.
 
+## Claude Code status line
+
+`home/.claude/statusline-command.sh` draws the line under the prompt:
+
+```
+[Opus 5 (high)] myrepo  feature/1234-rework-the-…-parser* | 19% ctx | 5h: 16% · 2h 54m | wk: 8%
+```
+
+It is fitted to the width of the pane, which matters in a vertical tmux split. The usage
+numbers on the right always survive. What gives way first is the worktree name, then the
+branch, then the effort note, then the repo name. Below that the usage numbers shrink to
+`19% | 5h 16% | wk 8%`.
+
+The name on the left is the repo, taken from the common git dir, so every worktree of a
+project shows the project rather than the name of its own folder. A `⇡name` marker appears
+only when the worktree folder is named after something other than the branch.
+
+Register it in `~/.claude/settings.json`, which stays untracked:
+
+```json
+{ "statusLine": { "type": "command", "command": "bash \"$HOME/.claude/statusline-command.sh\"" } }
+```
+
 ## Private overlay
 
 The repo is public, so it contains **only generic, shareable config**. Anything
