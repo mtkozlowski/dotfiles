@@ -13,6 +13,6 @@ os:
 # this one. Running the real binary directly gives you lazygit's stock colors,
 # which are unreadable under both ghostty themes.
 git:
-  pagers:
+  diffRenderers:
     - colorArg: always
-      pager: delta --dark --paging=never --syntax-theme=gruvbox-dark --line-numbers --minus-style='syntax "#3c1f1e"' --minus-emph-style='syntax "#5c2423"' --plus-style='syntax "#2e3b2b"' --plus-emph-style='syntax "#476047"'
+      command: delta --dark --paging=never --syntax-theme=gruvbox-dark --line-numbers --minus-style='syntax "#3c1f1e"' --minus-emph-style='syntax "#5c2423"' --plus-style='syntax "#2e3b2b"' --plus-emph-style='syntax "#476047"'
