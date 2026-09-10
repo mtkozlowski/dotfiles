@@ -36,3 +36,8 @@ local comment = require("util.comment")
 vim.keymap.set("n", "gco", comment.below, { desc = "Comment on line below" })
 vim.keymap.set("n", "gcO", comment.above, { desc = "Comment on line above" })
 vim.keymap.set("n", "gcA", comment.eol, { desc = "Comment at end of line" })
+
+-- The mini-surround extra, enabled in lazyvim.json, owns the `gs` prefix:
+-- `gsa` adds a surrounding pair, `gsd` deletes one, `gsr` replaces one, `gsf`
+-- and `gsF` jump to one, `gsh` highlights one. Noted here because JSON holds
+-- no comments, and because lua/plugins/treesj.lua works around this prefix.
