@@ -1,12 +1,12 @@
 [[plugin.deps]]
 use = "yazi-rs/plugins:toggle-pane"
-rev = "4dc7f1b"
+rev = "58c4f4e"
 hash = "5b2fbef7d1513ce38ff72623a071a5e"
 
 [[plugin.deps]]
 use = "yazi-rs/plugins:zoom"
-rev = "4dc7f1b"
-hash = "e8e279463ee99c940e6945a14cf4aa9e"
+rev = "58c4f4e"
+hash = "83bb4de74060a850749189645413fcae"
 
 [[plugin.deps]]
 use = "uhs-robert/sshfs"
@@ -15,7 +15,7 @@ hash = "8c1b36103121a66b37308afaf7124575"
 
 [[plugin.deps]]
 use = "yazi-rs/plugins:git"
-rev = "4dc7f1b"
+rev = "58c4f4e"
 hash = "5bb0bfab901d3601c370eafdd66edd31"
 
 [flavor]
