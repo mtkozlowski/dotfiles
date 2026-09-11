@@ -25,7 +25,6 @@ if [[ -f "/opt/homebrew/bin/brew" ]]; then
     export XDG_DATA_DIRS="/opt/homebrew/share:$XDG_DATA_DIRS"
 elif [[ -f "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
     # Linux
-    echo "Hello Linux!"
     eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 
