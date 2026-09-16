@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Claude Code status line script
-# [Model (effort)] repo  branch* ⇡wt | XX% ctx | 5h: YY% · Xh Ym | wk: ZZ%
+# [Model (effort)] repo  branch* | XX% ctx | 5h: YY% · Xh Ym | wk: ZZ%
 #
 # The line is fitted to the width of the pane. What gives way first is the
-# worktree, then the branch, then the effort note, then the repo name. The usage
-# numbers go last. The directory shown is the repo, not the checkout folder, so
-# a worktree named after its branch does not print the branch twice.
+# branch, then the effort note, then the repo name. The usage numbers go last.
+# The name shown is the repo, not the checkout folder, so a worktree reads as
+# its project rather than repeating its branch.
 
 input=$(cat)
 
@@ -16,7 +16,6 @@ eval "$(printf '%s' "$input" | jq -r '
   @sh "fast=\(.fast_mode // false)",
   @sh "agent=\(.agent.name // "")",
   @sh "dir=\(.workspace.current_dir // .cwd // "")",
-  @sh "wt=\(.workspace.git_worktree // "")",
   @sh "ctx_used=\(.context_window.used_percentage // "")",
   @sh "five_pct=\(.rate_limits.five_hour.used_percentage // "")",
   @sh "five_at=\(.rate_limits.five_hour.resets_at // "")",
@@ -87,17 +86,6 @@ if [ -n "$dir" ]; then
   fi
 fi
 
-# A worktree named after its branch says nothing the branch has not said.
-# Folder names carry dashes where a branch carries slashes, so compare loosely.
-# nocasematch keeps this to shell builtins, which bash 3.2 on macOS also has.
-shopt -s nocasematch
-wt_name=""
-[ -n "$wt" ] && wt_name=$(basename "$wt")
-if [ -n "$wt_name" ] && [[ ${wt_name//[\/_]/-} == "${branch//[\/_]/-}" ]]; then
-  wt_name=""
-fi
-shopt -u nocasematch
-
 # Context window.
 if [ -n "$ctx_used" ]; then
   ctx_part="$(printf '%.0f' "$ctx_used")% ctx"
@@ -146,7 +134,7 @@ usage_mid=$(usage_parts " | " "$ctx_short" "$five_short" "$week_short")
 usage_min=$(usage_parts " | " "$ctx_short" "$five_short" "")
 
 # Build the left side from the budget each field is given, into HEAD.
-# $1 keep the effort note, $2 repo chars, $3 branch chars, $4 worktree chars.
+# $1 keep the effort note, $2 repo chars, $3 branch chars.
 build_head() {
   local h
   if [ "$1" = "1" ]; then h="[${model}${model_note}]"; else h="[${model}]"; fi
@@ -154,8 +142,6 @@ build_head() {
   [ -n "$SHORT" ] && h="${h} ${SHORT}"
   shorten "$branch" "$3"
   [ -n "$SHORT" ] && h="${h}  ${SHORT}${dirty}"
-  shorten "$wt_name" "$4"
-  [ -n "$SHORT" ] && h="${h} ⇡${SHORT}"
   HEAD=$h
 }
 
@@ -163,26 +149,26 @@ build_head() {
 width=${COLUMNS:-200}
 
 # Widest first, then give up space until the whole line fits.
-# Fields are: usage form, effort note, repo, branch, worktree.
+# Fields are: usage form, effort note, repo, branch.
 # The usage numbers are the last thing to give ground.
 for step in \
-  "full 1 40 60 40" \
-  "full 1 24 32 20" \
-  "full 1 16 24 12" \
-  "full 1 12 16 0" \
-  "full 0 10 14 0" \
-  "full 0 8 10 0" \
-  "mid  0 8 10 0" \
-  "mid  0 0 8 0" \
-  "min  0 0 8 0" \
-  "min  0 0 0 0"; do
-  read -r form keep_note dir_max branch_max wt_max <<<"$step"
+  "full 1 40 60" \
+  "full 1 24 32" \
+  "full 1 16 24" \
+  "full 1 12 16" \
+  "full 0 10 14" \
+  "full 0 8 10" \
+  "mid  0 8 10" \
+  "mid  0 0 8" \
+  "min  0 0 8" \
+  "min  0 0 0"; do
+  read -r form keep_note dir_max branch_max <<<"$step"
   case $form in
     full) usage=$usage_full ;;
     mid) usage=$usage_mid ;;
     *) usage=$usage_min ;;
   esac
-  build_head "$keep_note" "$dir_max" "$branch_max" "$wt_max"
+  build_head "$keep_note" "$dir_max" "$branch_max"
   # Two spare columns: some glyphs here take two cells but count as one char.
   [ $((${#HEAD} + ${#usage} + 3)) -le $((width - 2)) ] && break
 done
@@ -194,7 +180,7 @@ slack=$((width - 2 - ${#head} - ${#usage} - 3))
 if [ "$slack" -gt 0 ] && [ "${#branch}" -gt "$branch_max" ]; then
   for extra in "$slack" $((slack - 3)); do
     [ "$extra" -lt 1 ] && continue
-    build_head "$keep_note" "$dir_max" $((branch_max + extra)) "$wt_max"
+    build_head "$keep_note" "$dir_max" $((branch_max + extra))
     if [ $((${#HEAD} + ${#usage} + 3)) -le $((width - 2)) ]; then
       head=$HEAD
       break

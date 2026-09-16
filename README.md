@@ -22,7 +22,7 @@ clean separation between what's safe to publish and what stays private.
 | `sesh`       | [sesh](https://github.com/joshmedeski/sesh) | tmux session manager |
 | `aerospace`  | [AeroSpace](https://github.com/nikitabobko/AeroSpace) | tiling WM (macOS) |
 | `vim`        | vim | minimal fallback `.vimrc` |
-| `scripts`    | — | helpers, incl. `bup` (summarizes what `brew upgrade` changes), `mux-open`/`mux-copy` (same command under tmux and herdr) and `openvpn-systemd` (OpenVPN client as a managed systemd unit) |
+| `scripts`    | — | helpers, incl. `bup` (summarizes what `brew upgrade` changes), `mux-open`/`mux-copy` (same command under tmux and herdr), `sync-packages` (installs the pinned yazi and nvim plugins) and `openvpn-systemd` (OpenVPN client as a managed systemd unit) |
 | `agents`     | — | `AGENTS.md`: universal working agreements shared by every coding agent |
 | `home`       | — | files that belong in `$HOME` rather than `~/.config` (see below) |
 
@@ -54,6 +54,34 @@ package holds the config file rather than a directory to link.
 
 zsh is loaded via `ZDOTDIR="$XDG_CONFIG_HOME/zsh"` (set in `~/.zshenv`), so
 `~/.config/zsh/.zshrc` is the entrypoint.
+
+## Keeping a machine in step after a pull
+
+`yazi/package.toml` and `nvim/lazy-lock.json` pin plugin versions, but the plugins
+themselves live in gitignored directories. Pulling a pin does not move them, so a
+`post-merge` hook installs them:
+
+```
+.githooks/post-merge     runs after git pull or git merge
+scripts/sync-packages    does the work, and can be run by hand
+```
+
+The hook passes `ORIG_HEAD`, so each tool runs only when the pull touched its
+manifest. A pull that changes neither costs about 50ms. Both commands install the
+pinned revision and leave the manifest alone:
+
+| Manifest | Installed with | Bumped with |
+|---|---|---|
+| `yazi/package.toml` | `ya pkg install` | `ya pkg upgrade --discard` |
+| `nvim/lazy-lock.json` | `nvim --headless "+Lazy! restore" +qa` | `:Lazy sync` |
+
+Bumping a pin is a deliberate act on one machine, followed by a commit of the
+manifest. Every other machine picks it up on its next pull.
+
+`git pull --rebase` skips this hook, because git calls `post-rewrite` on that
+path. `pull.rebase` is unset in this repo, so a plain pull takes the merge path.
+
+Run `sync-packages` with no argument on a fresh clone to install everything.
 
 ## Agent rules
 
@@ -125,13 +153,11 @@ a literal), then register the `Notification`, `Stop` and `SessionEnd` hooks in
 ```
 
 It is fitted to the width of the pane, which matters in a vertical tmux split. The usage
-numbers on the right always survive. What gives way first is the worktree name, then the
-branch, then the effort note, then the repo name. Below that the usage numbers shrink to
-`19% | 5h 16% | wk 8%`.
+numbers on the right always survive. What gives way first is the branch, then the effort
+note, then the repo name. Below that the usage numbers shrink to `19% | 5h 16% | wk 8%`.
 
 The name on the left is the repo, taken from the common git dir, so every worktree of a
-project shows the project rather than the name of its own folder. A `⇡name` marker appears
-only when the worktree folder is named after something other than the branch.
+project shows the project rather than the name of its own folder.
 
 Register it in `~/.claude/settings.json`, which stays untracked:
 
