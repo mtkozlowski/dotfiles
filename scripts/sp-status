@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # sp-status — glance at (and browse) the Superpowers SDD ledger for the current project.
 #
+# RETIRED: superpowers is no longer in use. The prefix+G binding in
+# tmux/tmux.reset.conf is commented out. This script is kept for reference.
+#
 # Default: prints a distilled digest of .superpowers/sdd/progress*.md
 #          (plan, per-task ✓/○ checklist, STATUS line, operator gates).
 #          In a TTY, press <enter> to drop into an fzf browser over the whole
