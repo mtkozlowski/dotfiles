@@ -1,0 +1,7 @@
+{
+  "id": "gruvbox-material",
+  "description": "Gruvbox Material light and dark app themes, and heavier bold text on web",
+  "requirements": {
+    "paseo": ">=0.10.2"
+  }
+}
