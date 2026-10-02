@@ -11,13 +11,14 @@ Four layers, innermost first. Each one catches what the one before it misses.
 | Layer | Mechanism | Fires when | Kills |
 |---|---|---|---|
 | 1 | cgroup `MemoryHigh` | user tree exceeds soft cap | nothing — throttles and reclaims |
-| 2 | cgroup `MemoryMax` + `MemorySwapMax` | user tree exceeds RAM **and** swap cap | largest process in that slice |
-| 3 | `systemd-oomd` PSI | slice stalls on memory >60% for 20s, or swap >70% used | highest-pressure descendant cgroup |
+| 2 | cgroup `MemoryMax` | user tree exceeds its RAM cap | largest process in that slice |
+| 3 | `systemd-oomd` PSI | slice stalls on memory above 60% for 20s, or swap above 90% used | highest-pressure descendant cgroup |
 | 4 | `earlyoom` | whole box below free-memory floor | highest-RSS process, box-wide |
 
-Layer 2 is the one that bounds damage: without `MemorySwapMax`, layer 1's reclaim has an
-entire swapfile to write into, so a memory overrun becomes unbounded thrash rather than a
-kill. `MemoryHigh` alone converts an overrun into a slow box.
+Layer 2 bounds damage. `MemoryMax` is the hard ceiling on one user's RAM, so a tree that
+reaches it takes a kill inside its own slice and leaves the rest of the box alone. Swap
+stays uncapped, which gives layer 1 reclaim somewhere to write and keeps a slice held at
+`MemoryHigh` able to make progress.
 
 Layer 3 gives per-pane granularity. tmux 3.6+ places each pane in its own
 `tmux-spawn-<uuid>.scope`, so oomd's "kill the highest-pressure descendant" lands on a
@@ -31,16 +32,22 @@ makes the swap term always true and silently reduces the tool to a memory-only t
 
 Per-user caps scale with box RAM and expected concurrent users:
 
-- `MemoryMax` ≈ 40% of total RAM per user
-- `MemoryHigh` ≈ 80% of `MemoryMax`
-- `MemorySwapMax` ≈ 10% of total RAM
+- `MemoryMax` is 40 percent of total RAM per user
+- `MemoryHigh` is 80 percent of `MemoryMax`
+- `MemorySwapMax` is `infinity`
 
-For an 8G box with two users: `MemoryMax=3G`, `MemoryHigh=2500M`, `MemorySwapMax=768M`.
-Two users can overcommit to 6G of 7.7G, and total swap draw is bounded at 1.5G regardless
-of workload.
+For an 8G box with two users: `MemoryMax=3G`, `MemoryHigh=2500M`,
+`MemorySwapMax=infinity`. Two users can overcommit to 6G of 7.7G. `MemoryHigh` and
+`MemoryMax` are what bound RAM, and per-user slices run with `MemorySwapMax=infinity` so
+reclaim can make progress.
 
-Swap larger than ~25% of RAM is a liability on these boxes: it is runway for thrash, and
-the per-slice swap cap makes it unnecessary. 2G is enough on an 8G box.
+Size the swapfile to hold what the slices actually page out during normal work. Read
+`memory.swap.current` per slice for that number. On an 8G box with two users at these
+caps, uid 1000 alone has held 6981M.
+
+`SwapUsedLimit` stays at the Ubuntu default of 90 percent. A slice sitting at
+`MemoryHigh` pages out continuously, so ordinary work already occupies a large share of
+the swapfile.
 
 ## Applying it
 
@@ -85,7 +92,8 @@ systemctl cat user-1000.slice | grep -E '^#|Memory'
 systemd-delta --type=extended
 ```
 
-Expect `memory.swap.max` at the computed value on every `user-*.slice`, and both a "Swap
+Expect `memory.max` at the computed value and `memory.swap.max` reading `max` on every
+`user-*.slice`, and both a "Swap
 Monitored CGroups" and "Memory Pressure Monitored CGroups" section in `oomctl` listing
 each active user slice. A user with no live session appears under swap monitoring but not
 pressure monitoring; that is normal and resolves when they log in.
@@ -156,11 +164,3 @@ Carry these forward; none are done.
       compose, or a dedicated slice via `cgroup-parent` in `/etc/docker/daemon.json`.
 - [ ] **`earlyoom` retune on `eh`.** Still ships `-m 10,5 -s 100,90`, i.e. memory-only at
       5%. `harden-memory.sh` corrects this but has not been run on `eh`.
-- [ ] **Three overlapping drop-ins on `eh`** in `/etc/systemd/system/user-.slice.d/`:
-      `50-oom.conf`, `mem.conf`, `oomd.conf`. They load alphabetically, so `mem.conf` wins
-      on `MemoryMax` with an identical value — no behavioral difference, but three files
-      state overlapping policy. Merge only after the guard is proven to fire.
-- [ ] **`SwapUsedLimit` is 90%** on `eh` (Ubuntu default). 70% acts before the swapfile is
-      drained. `harden-memory.sh` sets 70%.
-- [ ] **Guard unproven on `eh`.** Nothing has been killed. Run the load test above.
-- [ ] **Swap is 8G on an 8G box** on `eh`. Shrink to 2G once the caps are proven.

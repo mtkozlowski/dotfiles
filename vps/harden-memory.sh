@@ -17,7 +17,6 @@ MEM_KB=$(awk '/MemTotal/{print $2}' /proc/meminfo)
 MEM_MB=$(( MEM_KB / 1024 ))
 MAX_MB=$(( MEM_MB * 40 / 100 ))    # per-user hard cap
 HIGH_MB=$(( MAX_MB * 80 / 100 ))   # per-user throttle point
-SWAP_MB=$(( MEM_MB * 10 / 100 ))   # per-user swap cap
 
 report() {
   echo "== memory =="
@@ -41,7 +40,7 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
   exit 0
 fi
 
-echo "RAM ${MEM_MB}M -> per user: MemoryMax=${MAX_MB}M MemoryHigh=${HIGH_MB}M MemorySwapMax=${SWAP_MB}M"
+echo "RAM ${MEM_MB}M -> per user: MemoryMax=${MAX_MB}M MemoryHigh=${HIGH_MB}M MemorySwapMax=infinity"
 
 # --- layers 1+2: per-user cgroup caps ---------------------------------------
 install -d /etc/systemd/system/user-.slice.d
@@ -49,7 +48,8 @@ cat > /etc/systemd/system/user-.slice.d/50-oom.conf <<EOF
 [Slice]
 MemoryHigh=${HIGH_MB}M
 MemoryMax=${MAX_MB}M
-MemorySwapMax=${SWAP_MB}M
+# Uncapped so reclaim under MemoryHigh always has somewhere to write.
+MemorySwapMax=infinity
 MemoryPressureWatch=on
 ManagedOOMMemoryPressure=kill
 ManagedOOMMemoryPressureLimit=60%
@@ -71,8 +71,9 @@ fi
 install -d /etc/systemd/oomd.conf.d
 cat > /etc/systemd/oomd.conf.d/50-tune.conf <<'EOF'
 [OOM]
-# act before the swapfile is drained, not at the point of no return
-SwapUsedLimit=70%
+# Ubuntu default. Slices at MemoryHigh page out continuously, so a lower floor
+# arms the swap killer during normal work.
+SwapUsedLimit=90%
 DefaultMemoryPressureLimit=60%
 DefaultMemoryPressureDurationSec=20s
 EOF
