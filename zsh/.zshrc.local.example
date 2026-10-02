@@ -136,15 +136,22 @@
 #   export GH_DASH_CONFIG="$out"
 # }
 
-# --- ssh-agent persistence (Linux / VPS) --------------------------------------
-# keychain reuses a single ssh-agent across logins so you unlock a key once.
+# --- ssh-agent (Linux / VPS) --------------------------------------------------
+# One agent for logins, tmux panes and systemd user services (the Paseo daemon,
+# and every agent and terminal it starts): the systemd user agent from Ubuntu's
+# ssh-agent.socket. Its socket path is fixed, and with lingering on it outlives
+# logouts, so you unlock the key once per boot.
+# The `ssh-add -T` test succeeds only when the agent already holds the key, so the
+# passphrase prompt shows at the first login after a boot and never again. The
+# key is loaded at login because a service has no terminal to ask in.
+# The tmux line updates the global environment, so new panes get the same agent.
 # macOS does NOT need this: launchd runs a persistent agent and Keychain stores
 # the passphrase — set `AddKeysToAgent yes` + `UseKeychain yes` in ~/.ssh/config
 # and `ssh-add --apple-use-keychain` once instead.
-# The guard skips keychain's ~110ms scan when a working agent is already inherited
-# (e.g. a tmux pane), so it only pays the cost bootstrapping the first agent.
-# if [[ -z "$SSH_AUTH_SOCK" || ! -S "$SSH_AUTH_SOCK" ]] && command -v keychain >/dev/null 2>&1; then
-#   eval "$(keychain --eval --quiet --agents ssh id_ed25519)"
+# if [[ -S /run/user/$UID/openssh_agent ]]; then
+#   export SSH_AUTH_SOCK=/run/user/$UID/openssh_agent
+#   [[ -n $TMUX ]] && tmux set-environment -g SSH_AUTH_SOCK "$SSH_AUTH_SOCK"
+#   ssh-add -T ~/.ssh/id_ed25519.pub 2> /dev/null || ssh-add ~/.ssh/id_ed25519
 # fi
 
 # --- Secrets (1Password CLI) --------------------------------------------------
