@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Post-merge package sync for this dotfiles repo.
+#
+# Enable on a fresh clone with:
+#   git config core.hooksPath .githooks
+#
+# A pull that moves yazi/package.toml or nvim/lazy-lock.json only moves the
+# manifest; the packages live in gitignored directories and stay where they
+# were. This installs them, so a pull leaves the machine consistent.
+#
+# Fires on `git pull` and `git merge`, including a fast-forward. It does NOT
+# fire on `git pull --rebase`, where git calls post-rewrite instead; pull.rebase
+# is unset here, so a plain pull takes the merge path.
+set -uo pipefail
+
+# ORIG_HEAD is set on a fast-forward pull too, so the range is reliable. Without
+# it, sync everything rather than nothing.
+since=$(git rev-parse --verify --quiet ORIG_HEAD || true)
+
+exec "$(git rev-parse --show-toplevel)/scripts/sync-packages" $since

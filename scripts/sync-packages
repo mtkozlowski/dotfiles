@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Install the out-of-tree packages this repo pins, on this machine.
+#
+#   sync-packages            sync everything
+#   sync-packages ORIG_HEAD  sync only what changed since that commit
+#
+# yazi/plugins and nvim's plugin directory are both gitignored, so pulling a
+# manifest change does not move the packages themselves. This does.
+#
+# Both commands install the pinned revision and leave the manifest untouched.
+# Bumping a pin is a separate, deliberate act on one machine:
+#   ya pkg upgrade --discard   then commit yazi/package.toml
+#   :Lazy sync                 then commit nvim/lazy-lock.json
+#
+# Run by .githooks/post-merge after a pull, and safe to run by hand.
+set -uo pipefail
+
+self=$(readlink -f "$0")
+repo=$(git -C "${self%/*}" rev-parse --show-toplevel)
+since="${1:-}"
+
+case "$since" in
+  -h|--help) sed -n '2,10p' "$self" | sed 's/^# \?//'; exit 0 ;;
+esac
+
+# An unusable ref must widen to a full sync, never silently skip everything.
+if [ -n "$since" ] && ! git -C "$repo" rev-parse --verify --quiet "$since^{commit}" >/dev/null; then
+  echo "-- '$since' is not a commit; syncing everything" >&2
+  since=""
+fi
+
+# With no ref every manifest counts as changed.
+changed() {
+  [ -z "$since" ] && return 0
+  [ -n "$(git -C "$repo" diff --name-only "$since" HEAD -- "$1")" ]
+}
+
+status=0
+
+if changed yazi/package.toml; then
+  if command -v ya >/dev/null 2>&1; then
+    echo "==> yazi: installing the plugins pinned in yazi/package.toml"
+    ya pkg install || { echo "!! ya pkg install failed" >&2; status=1; }
+  else
+    echo "-- yazi: 'ya' is not installed, skipping" >&2
+  fi
+fi
+
+# Gated on the lock alone. A plugin added to nvim/lua/plugins without a matching
+# lock entry needs :Lazy sync, which writes the lock and so is not a hook's job.
+if changed nvim/lazy-lock.json; then
+  if command -v nvim >/dev/null 2>&1; then
+    echo "==> nvim: restoring plugins to nvim/lazy-lock.json"
+    # This config has hung headless before, so cap it rather than letting a
+    # pull block forever. `Lazy!` with the bang blocks until the tasks finish.
+    timeout 180 nvim --headless "+Lazy! restore" +qa </dev/null
+    rc=$?
+    [ "$rc" -eq 124 ] && { echo "!! nvim timed out after 180s" >&2; status=1; }
+    [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && { echo "!! Lazy restore exited $rc" >&2; status=1; }
+  else
+    echo "-- nvim: not installed, skipping" >&2
+  fi
+fi
+
+exit "$status"
