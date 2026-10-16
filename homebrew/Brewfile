@@ -21,6 +21,8 @@ brew "carapace"
 brew "ccache"
 # Cross-platform make
 brew "cmake"
+# Dependency manager for Cocoa projects
+brew "cocoapods"
 # Get a file from an HTTP, HTTPS or FTP server
 brew "curl"
 # Play, record, convert, and stream select audio and video codecs
@@ -120,7 +122,7 @@ brew "uv"
 # Internet file retriever
 brew "wget"
 # Port of OpenAI's Whisper model in C/C++
-brew "whisper-cpp"
+brew "whisper.cpp"
 # Library to create, extract, and modify Windows Imaging files
 brew "wimlib"
 # Tools for the WireGuard secure network tunnel
@@ -144,13 +146,15 @@ brew "wsagency/tap/clamp"
 cask "1password-cli"
 # AeroSpace is an i3-like tiling window manager for macOS
 cask "nikitabobko/tap/aerospace"
+# Microsoft Azure CLI 2.0
+cask "azure-cli"
 # Compact TeX distribution as alternative to the full TeX Live / MacTeX
 cask "basictex"
 # Utility that prevents the system from going to sleep
 cask "caffeine"
-# Open-source screenshot and screen recording for macOS
+# Screenshot and screen recording tool
 cask "lzhgus/tap/capso"
-# Menu bar usage monitor for Codex and Claude
+# Menu bar app for tracking agentic coding limits and usage
 cask "codexbar"
 # Browser for SQLite databases
 cask "db-browser-for-sqlite"
