@@ -15,7 +15,7 @@
 # Outside tmux, fall back to asking the terminal for its background color
 # (OSC 11) and judging the brightness.
 #
-# This shadows the real lazygit: ~/dotfiles/scripts comes before the homebrew
+# This shadows the real lazygit: ~/.config/scripts comes before the homebrew
 # bin directory on PATH, and the real binary is found below by searching PATH
 # with this script's own directory removed.
 #

@@ -33,13 +33,17 @@ stowing the repo symlinks each package there (e.g. `~/.config/nvim -> dotfiles/n
 `home` is ignored in `.stowrc` and stowed separately, because it targets `$HOME`:
 
 ```sh
-git clone https://github.com/<you>/dotfiles ~/dotfiles
-cd ~/dotfiles
+git clone https://github.com/<you>/dotfiles   # the clone can live anywhere
+cd dotfiles
 stow .                                     # links every package into ~/.config
 stow --no-folding --target="$HOME" home    # the one package that targets $HOME, not ~/.config
 stow --no-folding --target="$HOME/.config/herdr" herdr   # see below
 git config core.hooksPath .githooks   # enable the secret-scanning pre-commit hook
 ```
+
+Stow writes relative links, so moving the clone breaks every one of them. Run the
+three `stow` commands again from the new location to relink. `.zshrc` exports the
+clone's root as `$DOTFILES`, found through the `~/.config/scripts` link.
 
 `--no-folding` is required for the `home` package. `~/.codex` and `~/.claude` are
 directories the tools write runtime state into (caches, sqlite databases, credentials).
@@ -189,7 +193,7 @@ top at shell startup:
 Copy the template to start a machine's overlay:
 
 ```sh
-cp ~/dotfiles/zsh/.zshrc.local.example ~/.config/zsh/.zshrc.local
+cp ~/.config/zsh/.zshrc.local.example ~/.config/zsh/.zshrc.local
 $EDITOR ~/.config/zsh/.zshrc.local
 ```
 

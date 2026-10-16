@@ -16,7 +16,7 @@ goto = "prefix+slash"
 # tmux/tmux.reset.conf. A popup floats over the tiled layout and closes when the
 # command exits. Herdr starts it in the focused pane's working directory, and
 # `lazygit` resolves to the theme wrapper in scripts/lazygit because
-# ~/dotfiles/scripts comes first on PATH. That wrapper reads the background color
+# ~/.config/scripts comes first on PATH. That wrapper reads the background color
 # over OSC 11, which Herdr answers, so the light and dark themes still follow the
 # terminal.
 [[keys.command]]

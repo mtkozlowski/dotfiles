@@ -119,8 +119,8 @@ dir, then re-stow individual files). Not worth doing — gitignore is fine.
 ## New-machine setup
 
 ```sh
-git clone <dotfiles> ~/dotfiles
-cd ~/dotfiles
+git clone <dotfiles>                                 # any location works
+cd dotfiles
 stow zsh                                             # plus other packages
 cp ~/.config/zsh/.zshrc.local.example \
    ~/.config/zsh/.zshrc.local

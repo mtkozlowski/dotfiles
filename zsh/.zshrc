@@ -154,8 +154,8 @@ bup() { brew-upgrade-changes "$@" && brewdump }
 # the macOS casks and clobber the shared Brewfile.
 brewdump() {
     [[ "$OSTYPE" == darwin* ]] || { print -u2 "brewdump: macOS only -- skipped."; return 0; }
-    brew bundle dump --file="$HOME/dotfiles/homebrew/Brewfile" --force
-    git -C "$HOME/dotfiles" diff -- homebrew/Brewfile
+    brew bundle dump --file="$HOME/.config/homebrew/Brewfile" --force
+    git -C "$HOME/.config/homebrew" diff -- Brewfile
 }
 
 # macos-only helpers
@@ -217,7 +217,11 @@ export STARSHIP_CONFIG=~/.config/starship/starship.toml
 if command -v wt >/dev/null 2>&1; then eval "$(command wt config shell init zsh)"; fi
 
 # claude-mv https://curiouslychase.com/posts/rescuing-your-claude-conversations-when-you-rename-projects/
-export PATH="$HOME/dotfiles/scripts:$PATH"
+export PATH="$HOME/.config/scripts:$PATH"
+
+# The root of the dotfiles clone, read from a stowed link so it is right
+# wherever the clone lives. sesh/sesh.toml and the setup notes use it.
+export DOTFILES=${${:-$HOME/.config/scripts}:A:h}
 
 # Set up fzf key bindings and fuzzy completion
 command -v fzf >/dev/null 2>&1 && source <(fzf --zsh)

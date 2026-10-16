@@ -15,7 +15,7 @@
 # Setup on a machine:
 #   1. Create a bot with @BotFather, then send it any message and read your chat id
 #      from https://api.telegram.org/bot<TOKEN>/getUpdates
-#   2. cp ~/dotfiles/home/.claude/telegram.env.local.example ~/.claude/telegram.env.local
+#   2. cp "$DOTFILES/home/.claude/telegram.env.local.example" ~/.claude/telegram.env.local
 #      chmod 600 ~/.claude/telegram.env.local, then fill in the two values.
 #   3. Register the hooks in ~/.claude/settings.json (machine local, not tracked):
 #        "Notification": [{ "matcher": "*", "hooks": [

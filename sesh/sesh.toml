@@ -4,6 +4,7 @@ blacklist = ["scratch"]
 
 [[session]]
 name = "dotfiles"
-path = "~/dotfiles"
+# sesh expands environment variables. zsh/.zshrc exports DOTFILES.
+path = "$DOTFILES"
 startup_command = "nvim"
-# preview_command = "bat --color=always ~/dotfiles/.config/tmux/tmux.conf"
+# preview_command = "bat --color=always ~/.config/tmux/tmux.conf"

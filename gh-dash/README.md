@@ -23,12 +23,12 @@ config.base.yml + repoPaths.<host>.yml  →  $XDG_CACHE_HOME/gh-dash/config.yml
 
 Then `$GH_DASH_CONFIG` is exported pointing at that file. gh-dash reads it on launch and merges it on top of its built-in defaults.
 
-The assembly function lives in each machine's `~/dotfiles/zsh/.zshrc.local` (untracked, one per host). The template — with macOS and Linux variants — is in `zsh/.zshrc.local.example`. The function `cat`s the two source files together, `mkdir -p`s the cache dir, writes the output, and exports the env var. If either source file is missing the function prints to stderr what's missing and returns without exporting (so `gh dash` will fall back to its built-in defaults instead of silently using a stale assembly).
+The assembly function lives in each machine's `~/.config/zsh/.zshrc.local` (untracked, one per host). The template — with macOS and Linux variants — is in `zsh/.zshrc.local.example`. The function `cat`s the two source files together, `mkdir -p`s the cache dir, writes the output, and exports the env var. If either source file is missing the function prints to stderr what's missing and returns without exporting (so `gh dash` will fall back to its built-in defaults instead of silently using a stale assembly).
 
 ## Applying a change
 
 1. Edit `config.base.yml` (anything shared) or `repoPaths.<host>.yml` (per-machine paths).
-2. Start a new shell, or `source ~/dotfiles/zsh/.zshrc.local` in the current one.
+2. Start a new shell, or `source ~/.config/zsh/.zshrc.local` in the current one.
 3. Restart `gh dash`. It re-reads `$GH_DASH_CONFIG` at launch — there's no hot reload.
 
 ## Adding a new repo override
@@ -78,7 +78,7 @@ popup until gh-dash exits.
 
 ## Required binaries
 
-`gh`, `gh-dash` (`gh extension install dlvhdr/gh-dash`), `delta`, `wt` (worktrunk), `jq` (used by `mux-open` under herdr), `tmux`, `lazygit`, `nvim` (with `octo.nvim` — see `~/dotfiles/nvim/lua/plugins/octo.lua`), and `claude` (or `opencode` if you swap the `C` keybinding).
+`gh`, `gh-dash` (`gh extension install dlvhdr/gh-dash`), `delta`, `wt` (worktrunk), `jq` (used by `mux-open` under herdr), `tmux`, `lazygit`, `nvim` (with `octo.nvim` — see `~/.config/nvim/lua/plugins/octo.lua`), and `claude` (or `opencode` if you swap the `C` keybinding).
 
 ## Why `config.yml` is gitignored
 
