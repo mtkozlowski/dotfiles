@@ -1,0 +1,738 @@
+#!/usr/bin/env python3
+"""Move a project directory and every agent's record of it.
+
+Usage:
+  project-mv [-n] [-y] [-p] [-v] OLD NEW
+
+  -n, --dry-run   print the plan and exit
+  -y, --yes       skip the confirmation prompt
+  -p, --parents   create the parent directory of NEW
+  -v, --verbose   list every transcript folder that moves
+
+NEW is the full destination path. It is never "a directory to move into".
+When OLD is gone and NEW exists, the directory counts as already moved and
+only the records are repaired. Every step is idempotent, so running the same
+command again finishes a move that stopped part way.
+
+What follows the project:
+  - the directory and its worktrunk sibling OLD-worktrees
+  - git worktree links (git worktree repair) and paths in .git/config
+  - Claude Code: the ~/.claude/projects folders of the project, its
+    subdirectories and its worktrees, paths inside their transcripts and
+    memory, history.jsonl, sessions/*.json, jobs/*/state.json, the project
+    keys and githubRepoPaths in ~/.claude.json, and .claude/settings*.json
+    inside the project
+  - Codex: config.toml project keys, thread cwd and project roots in
+    state_5.sqlite, and the rollout files of those threads
+  - opencode: project, session, workspace and project_directory paths
+  - Paseo: projects.json, workspaces.json, agent records and agent folders
+  - zoxide entries and the latest tmux-resurrect snapshot
+
+Every running Claude Code process holds ~/.claude.json in memory and writes it
+back on exit. So that file changes only while no Claude process runs. Paseo
+files change only while the Paseo daemon is stopped. A skipped step is
+reported, and running the same command later completes it.
+
+The command refuses to start while claude, codex or opencode has its working
+directory inside OLD. Such a process keeps writing records under OLD.
+
+Each file is copied to ~/.local/state/project-mv/<timestamp>/ before it
+changes. Folder moves are listed in moves.txt in the same place. Delete that
+folder once the move checks out. Files that still mention OLD are listed at
+the end and left as they are.
+
+Exit status: 0 when done, 3 when done with a skipped step, 1 on error.
+"""
+
+import argparse
+import filecmp
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+CLAUDE = HOME / ".claude"
+CLAUDE_JSON = HOME / ".claude.json"
+CODEX = HOME / ".codex"
+OPENCODE_DB = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "opencode/opencode.db"
+PASEO = HOME / ".paseo"
+TMUX_RESURRECT_LAST = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "tmux/resurrect/last"
+STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "project-mv"
+
+AGENT_COMMANDS = {"claude", "codex", "opencode"}
+SHELLS = {"zsh", "bash", "sh", "dash", "fish", "nu"}
+WALK_SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", "target"}
+WALK_DEPTH = 4
+
+# A path ends where the next character cannot continue a file name.
+# A trailing "." still ends it when it closes a sentence.
+PATH_END = r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])"
+# Encoded folder names use "-" as their only separator.
+ENCODED_END = r"(?![A-Za-z0-9-])"
+
+# Claude Code turns every character outside [A-Za-z0-9] into "-".
+# Paths whose encoding is longer than this get a hashed name, which is not reproduced here.
+CLAUDE_NAME_MAX = 200
+
+
+def claude_name(path):
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
+
+
+def paseo_name(path):
+    return str(path).lstrip("/").replace("/", "-")
+
+
+def substituter(pairs, end):
+    pairs = sorted(((str(o), str(n)) for o, n in pairs if str(o) != str(n)), key=lambda p: -len(p[0]))
+    if not pairs:
+        return lambda text: (text, 0)
+    table = dict(pairs)
+    rx = re.compile("(" + "|".join(re.escape(o) for o, _ in pairs) + ")" + end)
+    return lambda text: rx.subn(lambda m: table[m.group(1)], text)
+
+
+def deep_merge(base, over):
+    if isinstance(base, dict) and isinstance(over, dict):
+        out = dict(base)
+        for k, v in over.items():
+            out[k] = deep_merge(out[k], v) if k in out else v
+        return out
+    return over
+
+
+def resolved(path):
+    """The path with symlinks resolved, also when it does not exist yet."""
+    path = Path(path)
+    if path.exists() or path == path.parent:
+        return Path(os.path.realpath(path))
+    return resolved(path.parent) / path.name
+
+
+def run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def cwd_processes():
+    """Yield (pid, command, cwd) for every process this user can see."""
+    proc = Path("/proc")
+    if proc.is_dir():
+        for p in proc.iterdir():
+            if not p.name.isdigit():
+                continue
+            try:
+                yield int(p.name), (p / "comm").read_text().strip(), os.readlink(p / "cwd")
+            except OSError:
+                continue
+        return
+    out = run(["lsof", "-a", "-d", "cwd", "-F", "pcn"]).stdout
+    pid = comm = None
+    for line in out.splitlines():
+        kind, value = line[:1], line[1:]
+        if kind == "p":
+            pid, comm = int(value), None
+        elif kind == "c":
+            comm = value
+        elif kind == "n" and pid is not None:
+            yield pid, os.path.basename(comm or ""), value
+
+
+def ancestors():
+    pids, pid = set(), os.getpid()
+    while pid > 1:
+        pids.add(pid)
+        out = run(["ps", "-o", "ppid=", "-p", str(pid)]).stdout.strip()
+        if not out.isdigit():
+            break
+        pid = int(out)
+    return pids
+
+
+def agent_processes():
+    """Map pid to agent name for every running claude, codex or opencode process.
+
+    Claude Code names its process after its version (2.1.296), so read the command line.
+    The first two words cover a binary started directly and a script started by node."""
+    agents = {}
+    for line in run(["ps", "-A", "-o", "pid=,args="]).stdout.splitlines():
+        pid, _, args = line.strip().partition(" ")
+        for word in args.split()[:2]:
+            name = os.path.basename(word)
+            if name in AGENT_COMMANDS and pid.isdigit():
+                agents[int(pid)] = name
+                break
+    return agents
+
+
+def running_commands():
+    return set(agent_processes().values())
+
+
+def paseo_running():
+    try:
+        pid = json.loads((PASEO / "paseo.pid").read_text())["pid"]
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return "Paseo Daemon" in run(["ps", "-A", "-o", "comm="]).stdout
+
+
+class Mover:
+    def __init__(self, old, new, dry, stamp, verbose=False):
+        self.old, self.new = old, new
+        self.old_wt = old.parent / f"{old.name}-worktrees"
+        self.new_wt = new.parent / f"{new.name}-worktrees"
+        # Records hold whichever form the agent saw, so map the path as typed and its resolved form.
+        pairs = set()
+        for o, n in {(old, new), (resolved(old), resolved(new))}:
+            pairs |= {(str(o), str(n)), (str(o.parent / f"{o.name}-worktrees"), str(n.parent / f"{n.name}-worktrees"))}
+        self.pairs = sorted(pairs, key=lambda p: -len(p[0]))
+        self.dry = dry
+        self.verbose = verbose
+        self.moved_tree = new.exists()
+        self.backup_dir = STATE / stamp
+        self.claude_dirs = []
+        self.sub = substituter(self.pairs, PATH_END)
+        self.sub_encoded = substituter([], ENCODED_END)
+        olds = {old, resolved(old)}
+        self.needles = [f(o).encode() for o in olds for f in (str, claude_name, paseo_name)]
+        self.rewritten = 0
+        self.skipped = []
+        self.conflicts = []
+
+    # --- primitives ---
+
+    def say(self, msg, detail=False):
+        if self.verbose or not detail:
+            print(("  plan: " if self.dry else "  ") + msg)
+
+    def remap(self, s):
+        for o, n in self.pairs:
+            if s == o or s.startswith(o + "/"):
+                return n + s[len(o):]
+        return None
+
+    def here(self, path):
+        """Where a NEW-side path sits right now. In a dry run the tree has not moved yet."""
+        if self.moved_tree:
+            return Path(path)
+        for o, n in self.pairs:
+            p = str(path)
+            if p == n or p.startswith(n + "/"):
+                return Path(o + p[len(n):])
+        return Path(path)
+
+    def backup(self, path):
+        dest = self.backup_dir / Path(path).relative_to("/")
+        if dest.exists():
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest)
+
+    def move(self, src, dst, detail=False):
+        self.say(f"move {src} -> {dst}", detail)
+        if self.dry:
+            return
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
+        with open(self.backup_dir / "moves.txt", "a") as f:
+            f.write(f"{src}\t{dst}\n")
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+
+    def move_or_merge(self, src, dst, detail=False):
+        if not dst.exists():
+            self.move(src, dst, detail)
+            return
+        self.say(f"merge {src} into {dst}")
+        for entry in sorted(os.listdir(src)):
+            s, d = src / entry, dst / entry
+            if not d.exists() and not d.is_symlink():
+                self.move(s, d, True)
+            elif s.is_dir() and d.is_dir() and not s.is_symlink():
+                self.move_or_merge(s, d, True)
+            elif s.is_file() and d.is_file() and filecmp.cmp(s, d, shallow=False):
+                self.move(s, self.backup_dir / "duplicates" / s.relative_to("/"), True)
+            else:
+                alt = d.with_name(f"{d.name}.from-{src.name}")
+                self.move(s, alt, True)
+                self.conflicts.append(alt)
+        if not self.dry:
+            os.rmdir(src)
+
+    def write(self, path, text, before):
+        real = Path(os.path.realpath(path))
+        if os.stat(real).st_mtime_ns != before:
+            return False
+        self.backup(real)
+        tmp = real.with_name(f".{real.name}.project-mv-{os.getpid()}")
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        shutil.copymode(real, tmp)
+        os.replace(tmp, real)
+        return True
+
+    def rewrite_file(self, path, transform=None, quiet=False):
+        """Apply transform (text -> (text, count)) to a file. Retry when another process writes it meanwhile.
+
+        Returns True when the file changes (or would change, in a dry run)."""
+        path = Path(path)
+        transform = transform or self.rewrite_text
+        for _ in range(5):
+            try:
+                before = os.stat(os.path.realpath(path)).st_mtime_ns
+                data = path.read_bytes()
+            except OSError:
+                return False
+            if transform is self.rewrite_text and not any(n in data for n in self.needles):
+                return False
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                return False
+            out, count = transform(text)
+            if not count:
+                return False
+            if not quiet:
+                self.say(f"rewrite {path} ({count})")
+            if self.dry or self.write(path, out, before):
+                self.rewritten += 1
+                return True
+        print(f"  warning: {path} kept changing; left as is", file=sys.stderr)
+        return False
+
+    def rewrite_text(self, text):
+        text, a = self.sub(text)
+        text, b = self.sub_encoded(text)
+        return text, a + b
+
+    def rewrite_json(self, path):
+        def transform(text):
+            data = json.loads(text)
+            out, count = self.remap_json(data)
+            if not count:
+                return text, 0
+            body = json.dumps(out, indent=2, ensure_ascii=False)
+            return body + ("\n" if text.endswith("\n") else ""), count
+        try:
+            self.rewrite_file(path, transform)
+        except json.JSONDecodeError:
+            print(f"  warning: {path} is not valid JSON; left as is", file=sys.stderr)
+
+    def remap_json(self, value):
+        """Rewrite path strings and path keys. A moved key merges into an existing NEW key, OLD values win."""
+        if isinstance(value, str):
+            m = self.remap(value)
+            return (m, 1) if m else (value, 0)
+        if isinstance(value, list):
+            items, count = [], 0
+            for v in value:
+                v2, c = self.remap_json(v)
+                count += c
+                if not (c and isinstance(v2, str) and v2 in items):
+                    items.append(v2)
+            return items, count
+        if isinstance(value, dict):
+            out, moved, count = {}, [], 0
+            for k, v in value.items():
+                v2, c = self.remap_json(v)
+                count += c
+                m = self.remap(k)
+                if m:
+                    moved.append((m, v2))
+                    count += 1
+                else:
+                    out[k] = v2
+            for k, v in moved:
+                out[k] = deep_merge(out[k], v) if k in out else v
+            return out, count
+        return value, 0
+
+    def walk_dirs(self, root):
+        """Yield NEW-side directories under root, root included, WALK_DEPTH levels deep."""
+        start = self.here(root)
+        if not start.is_dir():
+            return
+        base = len(start.parts)
+        for dirpath, dirnames, _ in os.walk(start):
+            depth = len(Path(dirpath).parts) - base
+            yield Path(str(root) + dirpath[len(str(start)):]), dirnames
+            dirnames[:] = [] if depth >= WALK_DEPTH else [d for d in dirnames if d not in WALK_SKIP]
+
+    # --- steps ---
+
+    def move_tree(self):
+        print("Project directory")
+        if self.old.exists():
+            self.move(self.old, self.new)
+        if self.old_wt.exists():
+            self.move(self.old_wt, self.new_wt)
+        if not self.dry:
+            self.moved_tree = True
+
+    def repair_git(self):
+        print("Git")
+        repos = []
+        for root in (self.new, self.new_wt):
+            for d, dirnames in self.walk_dirs(root):
+                if (self.here(d) / ".git").exists():
+                    repos.append(d)
+        for repo in repos:
+            git = self.here(repo) / ".git"
+            args = []
+            if git.is_dir():
+                self.rewrite_file(git / "config")
+                listing = run(["git", "-C", str(self.here(repo)), "worktree", "list", "--porcelain"]).stdout
+                paths = [l[len("worktree "):] for l in listing.splitlines() if l.startswith("worktree ")][1:]
+                for p in paths:
+                    target = self.remap(p) or p
+                    if self.here(target).is_dir():
+                        args.append(target)
+            cmd = ["git", "-C", str(repo), "worktree", "repair", *args]
+            self.say(" ".join(cmd[:5]) + (f" ({len(args)} worktrees)" if args else ""))
+            if not self.dry:
+                r = run(cmd)
+                if r.returncode:
+                    print(f"  warning: {' '.join(cmd)}: {r.stderr.strip()}", file=sys.stderr)
+
+    def known_old_paths(self):
+        paths = {str(self.old), str(self.old_wt)}
+        try:
+            paths |= set(json.loads(CLAUDE_JSON.read_text()).get("projects", {}))
+        except (OSError, json.JSONDecodeError):
+            pass
+        history = CLAUDE / "history.jsonl"
+        if history.exists():
+            for line in history.read_text(errors="replace").splitlines():
+                m = re.search(r'"project":\s*"((?:[^"\\]|\\.)*)"', line)
+                if m:
+                    paths.add(json.loads(f'"{m.group(1)}"'))
+        for root in (self.new, self.new_wt):
+            for d, _ in self.walk_dirs(root):
+                for o, n in self.pairs:
+                    if str(d) == n or str(d).startswith(n + "/"):
+                        paths.add(o + str(d)[len(n):])
+        return {p: self.remap(p) for p in paths if self.remap(p)}
+
+    def first_cwd(self, folder):
+        for f in sorted(folder.glob("*.jsonl")):
+            try:
+                with open(f, encoding="utf-8", errors="replace") as fh:
+                    for _, line in zip(range(30), fh):
+                        cwd = json.loads(line).get("cwd")
+                        if cwd:
+                            return cwd
+            except (OSError, json.JSONDecodeError, AttributeError):
+                continue
+        return None
+
+    def claude(self, claude_running):
+        print("Claude Code")
+        projects = CLAUDE / "projects"
+        by_name = {claude_name(o): n for o, n in self.known_old_paths().items()}
+        renames, folders = [], []
+        if projects.is_dir():
+            for folder in sorted(projects.iterdir()):
+                if not folder.is_dir():
+                    continue
+                cwd = self.first_cwd(folder)
+                if cwd and claude_name(cwd) == folder.name and self.remap(cwd):
+                    target = self.remap(cwd)
+                elif folder.name in by_name:
+                    target = by_name[folder.name]
+                elif cwd and claude_name(cwd) == folder.name and any(
+                        cwd == n or cwd.startswith(n + "/") for _, n in self.pairs):
+                    folders.append(folder)  # moved earlier; contents may still need rewriting
+                    continue
+                else:
+                    continue
+                name = claude_name(target)
+                if len(name) > CLAUDE_NAME_MAX:
+                    print(f"  warning: {folder.name} needs a hashed name; left as is", file=sys.stderr)
+                    continue
+                renames.append((folder, projects / name))
+        for src, dst in renames:
+            self.move_or_merge(src, dst, detail=True)
+            folders.append(src if self.dry else dst)
+        if renames:
+            self.say(f"move {len(renames)} folders in {projects} (-v lists them)")
+        self.sub_encoded = substituter([(s.name, d.name) for s, d in renames], ENCODED_END)
+        self.claude_dirs = folders
+        total = 0
+        for folder in folders:
+            changed = sum(self.rewrite_file(f, quiet=True) for f in sorted(folder.rglob("*")) if f.is_file())
+            total += changed
+            if changed:
+                self.say(f"rewrite {changed} files in {folder}", detail=True)
+        if total:
+            self.say(f"rewrite {total} transcript and memory files in those folders")
+        self.rewrite_file(CLAUDE / "history.jsonl")
+        for f in sorted((CLAUDE / "sessions").glob("*.json")) + sorted((CLAUDE / "jobs").glob("*/state.json")):
+            self.rewrite_file(f)
+        for root in (self.new, self.new_wt):
+            for d, _ in self.walk_dirs(root):
+                for name in ("settings.json", "settings.local.json"):
+                    self.rewrite_file(self.here(d) / ".claude" / name)
+        if not CLAUDE_JSON.exists():
+            return
+        if claude_running:
+            self.skipped.append("~/.claude.json was not changed because Claude Code is running. Quit every Claude Code session first.")
+            self.say("skip ~/.claude.json while Claude Code runs")
+            return
+        self.rewrite_json(CLAUDE_JSON)
+
+    def sqlite_paths(self, db, columns, text_columns=()):
+        """Remap whole-path columns and substitute inside text columns. Missing tables are skipped."""
+        if not db.exists():
+            return 0
+        con = sqlite3.connect(db, timeout=10)
+        try:
+            tables = {t: {r[1] for r in con.execute(f'pragma table_info("{t}")')}
+                      for (t,) in con.execute("select name from sqlite_master where type='table'")}
+            updates = []
+            for table, col, is_text in [(t, c, False) for t, c in columns] + [(t, c, True) for t, c in text_columns]:
+                if col not in tables.get(table, ()):
+                    continue
+                rows = con.execute(f'select rowid, "{col}" from "{table}" where instr("{col}", ?) > 0', (str(self.old),))
+                for rowid, value in rows:
+                    new = self.sub(value)[0] if is_text else self.remap(value)
+                    if new and new != value:
+                        updates.append((table, col, rowid, new))
+            if not updates:
+                return 0
+            self.say(f"update {len(updates)} rows in {db}")
+            if self.dry:
+                return len(updates)
+            dest = self.backup_dir / Path(db).relative_to("/")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists():
+                copy = sqlite3.connect(dest)
+                con.backup(copy)
+                copy.close()
+            with con:
+                for table, col, rowid, new in updates:
+                    try:
+                        con.execute(f'update "{table}" set "{col}" = ? where rowid = ?', (new, rowid))
+                    except sqlite3.IntegrityError:
+                        con.execute(f'delete from "{table}" where rowid = ?', (rowid,))
+            return len(updates)
+        finally:
+            con.close()
+
+    def codex(self):
+        print("Codex")
+
+        def toml(text):
+            out, count = self.rewrite_text(text)
+            try:
+                import tomllib
+                tomllib.loads(out)
+            except ImportError:
+                pass
+            except tomllib.TOMLDecodeError as e:
+                # Typically both the OLD and the NEW project table exist.
+                print(f"  warning: config.toml would be invalid after the rewrite ({e}); edit it by hand", file=sys.stderr)
+                return text, 0
+            return out, count
+
+        self.rewrite_file(CODEX / "config.toml", toml)
+        db = CODEX / "state_5.sqlite"
+        self.sqlite_paths(db, [("threads", "cwd"), ("project_roots", "path")])
+        if db.exists():
+            con = sqlite3.connect(db, timeout=10)
+            try:
+                rollouts = [r for (r,) in con.execute("select rollout_path from threads where instr(cwd, ?) > 0 or instr(cwd, ?) > 0",
+                                                       (str(self.old), str(self.new)))]
+            except sqlite3.Error:
+                rollouts = []
+            finally:
+                con.close()
+            for r in rollouts:
+                self.rewrite_file(r)
+
+    def opencode(self):
+        print("opencode")
+        self.sqlite_paths(OPENCODE_DB,
+                          [("project", "worktree"), ("session", "directory"),
+                           ("workspace", "directory"), ("project_directory", "directory")],
+                          text_columns=[("project", "sandboxes")])
+
+    def paseo(self, running):
+        print("Paseo")
+        if not PASEO.is_dir():
+            return
+        if running:
+            self.skipped.append("Paseo records were not changed because the Paseo daemon is running. Quit Paseo first.")
+            self.say("skip Paseo while its daemon runs")
+            return
+        agents = PASEO / "agents"
+        folders = []
+        if agents.is_dir():
+            for folder in sorted(agents.iterdir()):
+                records = sorted(folder.glob("*.json")) if folder.is_dir() else []
+                try:
+                    cwd = json.loads(records[0].read_text()).get("cwd") if records else None
+                except (OSError, json.JSONDecodeError, AttributeError):
+                    cwd = None
+                target = self.remap(cwd) if cwd else None
+                if target and folder.name == paseo_name(cwd):
+                    self.move_or_merge(folder, agents / paseo_name(target))
+                    folders.append(folder if self.dry else agents / paseo_name(target))
+                elif cwd and any(cwd == n or cwd.startswith(n + "/") for _, n in self.pairs):
+                    folders.append(folder)
+        files = [PASEO / "config.json", PASEO / "projects/projects.json", PASEO / "projects/workspaces.json"]
+        files += sorted((PASEO / "creations").glob("*.json"))
+        files += [r for f in folders for r in sorted(f.glob("*.json"))]
+        for f in files:
+            if f.exists():
+                self.rewrite_json(f)
+
+    def zoxide(self):
+        if not shutil.which("zoxide"):
+            return
+        print("zoxide")
+        moved = 0
+        for line in run(["zoxide", "query", "--list", "--score", "--all"]).stdout.splitlines():
+            score, _, path = line.strip().partition(" ")
+            target = self.remap(path.strip())
+            if not target:
+                continue
+            moved += 1
+            self.say(f"zoxide {path.strip()} -> {target}", detail=True)
+            if not self.dry:
+                run(["zoxide", "add", "--score", score, target])
+                run(["zoxide", "remove", path.strip()])
+        if moved:
+            self.say(f"move {moved} zoxide entries")
+
+    def tmux(self):
+        if TMUX_RESURRECT_LAST.exists():
+            print("tmux-resurrect")
+            self.rewrite_file(TMUX_RESURRECT_LAST)
+
+    def sweep(self):
+        """List files that still mention OLD. Transcripts of other projects are left out on purpose."""
+        if not shutil.which("rg"):
+            print("rg not found; skipped the search for leftover references")
+            return
+        pattern = r"\Q" + str(self.old) + r"\E" + PATH_END
+        state = [p for p in (CLAUDE_JSON, CLAUDE, CODEX, PASEO) if p.exists()]
+        state_globs = ["!projects/**", "!file-history/**", "!paste-cache/**", "!backups/**", "!shell-snapshots/**",
+                       "!debug/**", "!todos/**", "!cache/**", "!plugins/**", "!sessions/**", "!*.log*", "!*.bak*",
+                       "!*.backup*", "!log/**", "!*.sqlite*"]
+        config = [p for p in (HOME / ".config", HOME / "dotfiles", HOME / ".dotfiles-private", HOME / ".zshrc",
+                              HOME / ".zshenv", self.new, self.new_wt) if p.exists()]
+        hits = []
+        for roots, flags in ((state, ["--no-ignore", *sum((["-g", g] for g in state_globs), [])]),
+                             (self.claude_dirs, ["--no-ignore"]), (config, [])):
+            if roots:
+                out = run(["rg", "-P", "-c", "--hidden", "--no-messages", *flags, "--", pattern, *map(str, roots)]).stdout
+                hits += out.splitlines()
+        print("Still mentions the old path (left as is):" if hits else "No file still mentions the old path.")
+        for h in sorted(set(hits)):
+            print(f"  {h}")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="project-mv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, add_help=False)
+    ap.add_argument("old")
+    ap.add_argument("new")
+    ap.add_argument("-n", "--dry-run", action="store_true")
+    ap.add_argument("-y", "--yes", action="store_true")
+    ap.add_argument("-p", "--parents", action="store_true")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("-h", "--help", action="help")
+    args = ap.parse_args()
+
+    old = Path(os.path.abspath(os.path.expanduser(args.old)))
+    new = Path(os.path.abspath(os.path.expanduser(args.new)))
+
+    def fail(msg):
+        print(f"project-mv: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    if resolved(old) == resolved(new):
+        fail("OLD and NEW are the same path")
+    if str(resolved(new)).startswith(f"{resolved(old)}/"):
+        fail("NEW is inside OLD")
+    if old.exists() and new.exists():
+        fail(f"{new} already exists. Pass the full destination path, not a directory to move into.")
+    if not old.exists() and not new.exists():
+        fail(f"neither {old} nor {new} exists")
+    if old.exists() and not old.is_dir():
+        fail(f"{old} is not a directory")
+    old_wt, new_wt = old.parent / f"{old.name}-worktrees", new.parent / f"{new.name}-worktrees"
+    if old_wt.exists() and new_wt.exists():
+        fail(f"both {old_wt} and {new_wt} exist")
+    if not new.parent.exists() and not args.parents:
+        fail(f"{new.parent} does not exist. Pass -p to create it.")
+
+    if old.exists():
+        mine = ancestors()
+        agents = agent_processes()
+        blockers, others = [], []
+        for pid, comm, cwd in cwd_processes():
+            comm = agents.get(pid, comm)
+            if pid in mine and comm not in AGENT_COMMANDS:
+                continue
+            if any(cwd == str(o) or cwd.startswith(f"{o}/") for o in {old, old_wt, resolved(old), resolved(old_wt)}):
+                (blockers if comm in AGENT_COMMANDS else others).append(f"{pid} {comm} in {cwd}")
+        if blockers:
+            msg = ("these agent processes work inside the project and would keep writing to the old path:\n  "
+                   + "\n  ".join(blockers))
+            if not args.dry_run:
+                fail(msg + "\nStop them and run the command again.")
+            print(f"Warning: {msg}\nA real run refuses to start until they stop.\n")
+        if others:
+            print("These processes work inside the project. They keep running, but their working directory goes stale:")
+            print("  " + "\n  ".join(others))
+
+    claude_running = "claude" in running_commands()
+    paseo_up = paseo_running()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+
+    def steps(mover):
+        mover.move_tree()
+        mover.repair_git()
+        mover.claude(claude_running)
+        mover.codex()
+        mover.opencode()
+        mover.paseo(paseo_up)
+        mover.zoxide()
+        mover.tmux()
+
+    print(f"{old}\n  -> {new}\n")
+    plan = Mover(old, new, True, stamp, args.verbose)
+    steps(plan)
+    for msg in plan.skipped:
+        print(f"\nSkipped: {msg}")
+    if args.dry_run:
+        return
+    if not args.yes:
+        if not sys.stdin.isatty():
+            fail("no terminal to confirm on. Pass -y to proceed.")
+        if input("\nProceed? [y/N] ").strip().lower() not in ("y", "yes"):
+            fail("aborted")
+
+    print()
+    mover = Mover(old, new, False, stamp, args.verbose)
+    steps(mover)
+    print(f"\nRewrote {mover.rewritten} files. Backups are in {mover.backup_dir}")
+    for c in mover.conflicts:
+        print(f"Merge by hand: {c} clashed with an existing file of the same name.")
+    print()
+    mover.sweep()
+    if mover.skipped:
+        for msg in mover.skipped:
+            print(f"\nSkipped: {msg}")
+        print(f"Then run the same command again: project-mv '{old}' '{new}'")
+        sys.exit(3)
+
+
+if __name__ == "__main__":
+    main()

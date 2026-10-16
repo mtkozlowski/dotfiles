@@ -216,7 +216,7 @@ export STARSHIP_CONFIG=~/.config/starship/starship.toml
 
 if command -v wt >/dev/null 2>&1; then eval "$(command wt config shell init zsh)"; fi
 
-# claude-mv https://curiouslychase.com/posts/rescuing-your-claude-conversations-when-you-rename-projects/
+# Personal helpers, e.g. project-mv and brew-upgrade-changes.
 export PATH="$HOME/.config/scripts:$PATH"
 
 # The root of the dotfiles clone, read from a stowed link so it is right

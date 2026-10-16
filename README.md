@@ -22,7 +22,7 @@ clean separation between what's safe to publish and what stays private.
 | `sesh`       | [sesh](https://github.com/joshmedeski/sesh) | tmux session manager |
 | `aerospace`  | [AeroSpace](https://github.com/nikitabobko/AeroSpace) | tiling WM (macOS) |
 | `vim`        | vim | minimal fallback `.vimrc` |
-| `scripts`    | — | helpers, incl. `bup` (summarizes what `brew upgrade` changes), `mux-open`/`mux-copy` (same command under tmux and herdr), `sync-packages` (installs the pinned yazi and nvim plugins) and `openvpn-systemd` (OpenVPN client as a managed systemd unit) |
+| `scripts`    | — | helpers, incl. `bup` (summarizes what `brew upgrade` changes), `mux-open`/`mux-copy` (same command under tmux and herdr), `sync-packages` (installs the pinned yazi and nvim plugins), `project-mv` (moves a project directory together with its Claude Code, Codex, opencode and Paseo history) and `openvpn-systemd` (OpenVPN client as a managed systemd unit) |
 | `agents`     | — | `AGENTS.md`: universal working agreements shared by every coding agent |
 | `home`       | — | files that belong in `$HOME` rather than `~/.config` (see below) |
 
