@@ -33,3 +33,9 @@ gui:
       - "#473c29"
     unstagedChangesColor:
       - "#ea6962"
+# Diffs go through delta with dark red and green backgrounds from the same
+# palette.
+git:
+  diffRenderers:
+    - colorArg: always
+      command: delta --dark --paging=never --syntax-theme=gruvbox-dark --line-numbers --minus-style='syntax "#3c1f1e"' --minus-emph-style='syntax "#5c2423"' --plus-style='syntax "#2e3b2b"' --plus-emph-style='syntax "#476047"'

@@ -30,3 +30,10 @@ gui:
       - "#f2e9e1"
     unstagedChangesColor:
       - "#b4637a"
+# Diffs go through delta with pale red and green backgrounds that suit the
+# cream base. bat ships no Rose Pine theme, so syntax colors come from
+# gruvbox-light, whose warm palette sits well on it.
+git:
+  diffRenderers:
+    - colorArg: always
+      command: delta --light --paging=never --syntax-theme=gruvbox-light --line-numbers --minus-style='syntax "#f3d9d6"' --minus-emph-style='syntax "#e8b9b4"' --plus-style='syntax "#dde8cf"' --plus-emph-style='syntax "#c4d9ac"'
