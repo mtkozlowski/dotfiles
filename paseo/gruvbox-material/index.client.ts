@@ -38,11 +38,30 @@ export default function contribute(client: PluginClientContext) {
     },
   });
 
+  // Rosé Pine Dawn, the light theme Ghostty uses. Colors come from Ghostty's
+  // bundled "Rose Pine Dawn" theme and the Rosé Pine palette names.
+  const removeRosePineDawn = client.addTheme({
+    id: "rose-pine-dawn",
+    name: "Rosé Pine Dawn",
+    appearance: "light",
+    colors: {
+      background: "#faf4ed", // base
+      foreground: "#575279", // text
+      raised: "#fffaf3", // surface
+      control: "#f2e9e1", // overlay
+      border: "#dfdad9", // highlight med
+      accent: "#286983", // pine
+      mutedForeground: "#797593", // subtle
+      ring: "#9893a5", // muted
+    },
+  });
+
   const removeBoldStyle = injectBoldStyle();
 
   return () => {
     removeDark();
     removeLight();
+    removeRosePineDawn();
     removeBoldStyle();
   };
 }
