@@ -12,7 +12,7 @@ export default function contribute(client: PluginClientContext) {
     appearance: "dark",
     colors: {
       background: "#282828", // bg0
-      foreground: "#d4be98", // fg0
+      foreground: "#DBCCB3", // fg0
       raised: "#32302f", // bg1
       control: "#45403d", // bg3
       border: "#5a524c", // bg5
