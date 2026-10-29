@@ -2,11 +2,11 @@
 --
 -- Owns two concerns:
 --   1. light/dark: follows the macOS system appearance by default, but can be
---      pinned manually to dark/light (both catppuccin and gruvbox-material honor
---      `vim.o.background`, so we only flip that). `:BackgroundCycle` steps through
+--      pinned manually to dark/light. `:BackgroundCycle` steps through
 --      dark → light → auto; `:Background dark|light|auto` sets one directly.
 --   2. which colorscheme is active is a persisted, runtime-toggleable choice.
---      Use `:ColorschemeToggle` to flip between the two.
+--      Use `:ColorschemeToggle` to flip between the two. Each choice names the
+--      colorscheme to load for each background (see VARIANTS).
 --
 -- Both choices are saved under stdpath("data") so they survive restarts.
 
@@ -16,6 +16,14 @@ local STATE_FILE = vim.fn.stdpath("data") .. "/colorscheme"
 local BG_FILE = vim.fn.stdpath("data") .. "/background"
 local SCHEMES = { "catppuccin", "gruvbox-material" }
 local DEFAULT = SCHEMES[1]
+
+-- The colorscheme loaded for each choice and background. catppuccin follows
+-- `vim.o.background` by itself; the gruvbox-material choice uses Rosé Pine Dawn
+-- when light, to match Ghostty's light theme.
+local VARIANTS = {
+  catppuccin = { dark = "catppuccin", light = "catppuccin" },
+  ["gruvbox-material"] = { dark = "gruvbox-material", light = "rose-pine-dawn" },
+}
 
 local function read_choice()
   local f = io.open(STATE_FILE, "r")
@@ -84,8 +92,7 @@ function M.sync()
   if want and vim.o.background ~= want then
     vim.o.background = want
   end
-  -- catppuccin (flavour = "auto") and gruvbox-material both follow `background`.
-  pcall(vim.cmd.colorscheme, M.current)
+  pcall(vim.cmd.colorscheme, VARIANTS[M.current][vim.o.background])
 end
 
 -- Pin the background to "dark"/"light", or "auto" to follow the system again.

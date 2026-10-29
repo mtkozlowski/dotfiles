@@ -1,6 +1,13 @@
--- Both colorschemes are installed; the active one (and light/dark switching) is
--- driven by lua/config/colorscheme.lua. Toggle with `:ColorschemeToggle`.
+-- The colorschemes are installed here; the active one (and light/dark switching)
+-- is driven by lua/config/colorscheme.lua. Toggle with `:ColorschemeToggle`.
 return {
+  {
+    -- Light half of the gruvbox-material choice, matching Ghostty's light theme.
+    "rose-pine/neovim",
+    name = "rose-pine",
+    lazy = false,
+    priority = 1000,
+  },
   {
     "sainnhe/gruvbox-material",
     lazy = false,
@@ -17,8 +24,8 @@ return {
     name = "catppuccin",
     lazy = false,
     priority = 1000,
-    -- Ensure gruvbox-material is loaded too, so the controller can switch to it.
-    dependencies = { "sainnhe/gruvbox-material" },
+    -- Ensure the other colorschemes are loaded too, so the controller can switch to them.
+    dependencies = { "sainnhe/gruvbox-material", "rose-pine/neovim" },
     opts = {
       flavour = "auto",
       -- dark options: frappe, macchiato, mocha
@@ -26,7 +33,7 @@ return {
     },
     config = function(_, opts)
       require("catppuccin").setup(opts)
-      -- Both colorschemes are now available; wire up sync + toggle.
+      -- All colorschemes are now available; wire up sync + toggle.
       require("config.colorscheme").setup()
     end,
   },
